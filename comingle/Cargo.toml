@@ -15,6 +15,8 @@ bytesize = "2.3.1"
 clap = { version = "4.6.0", features = ["derive", "env"] }
 dotenvy = "0.15.7"
 futures = "0.3.32"
+geojson = "1.0.0"
+glam = "0.32.1"
 humantime = "2.3.0"
 iref = "4.0.0"
 iri-string = "0.7.12"
@@ -31,3 +33,7 @@ tokio = { version = "1.50.0", features = ["full"] }
 tower-http = { version = "0.6.8", features = ["cors", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
+transforms = { workspace = true}
+gltf_arc = { workspace = true}
+gltf_types = { workspace = true}
+gltf_io = { workspace = true}

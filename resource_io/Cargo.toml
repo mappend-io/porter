@@ -8,6 +8,7 @@ authors.workspace = true
 async-trait = "0.1.89"
 aws-config = "1.8.15"
 aws-sdk-s3 = "1.128.0"
+bytemuck = { version = "1.25.0", features = ["derive", "extern_crate_alloc"] }
 bytes = "1.11.1"
 flate2 = "1.1.9"
 futures = "0.3.32"

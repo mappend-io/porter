@@ -32,6 +32,7 @@ impl FileRangeReader {
 #[async_trait]
 impl RangeReader for FileRangeReader {
     async fn read_range_async(&self, offset: u64, length: u64) -> Result<Bytes, Error> {
+        //println!("Read offset={offset}, len={length}");
         // TODO: proper way to handle invalid reads, probably Err instead
         if length == 0 || offset >= self.size {
             return Ok(Bytes::new());

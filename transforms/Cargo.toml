@@ -1,0 +1,20 @@
+[package]
+name = "transforms"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = "1.0.102"
+bytes = "1.11.1"
+geojson = "1.0.0"
+glam = "0.32.1"
+gltf_arc = { workspace = true }
+gltf_io = { workspace = true }
+gltf_types.workspace = true
+iri-string = "0.7.12"
+itertools = "0.14.0"
+resource_io = { workspace = true }
+serde_json = "1.0.149"
+tokio = { version = "1.52.1", features = ["rt", "rt-multi-thread"] }

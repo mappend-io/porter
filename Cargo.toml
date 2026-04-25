@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["comingle", "resource_io"]
+members = ["comingle", "gltf_io", "gltf_arc", "gltf_types", "resource_io", "transforms"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,7 +10,12 @@ license = "MIT"
 
 [workspace.dependencies]
 comingled = { path = "comingle" }
+gltf_arc = { path = "gltf_arc" }
+gltf_io = { path = "gltf_io" }
+gltf_types = { path = "gltf_types" }
 resource_io = { path = "resource_io" }
+transforms = { path = "transforms" }
 
 [profile.release]
 strip = true
+#debug = true

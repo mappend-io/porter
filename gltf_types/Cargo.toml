@@ -1,0 +1,14 @@
+[package]
+name = "gltf_types"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = "1.0.102"
+bytes = "1.11.1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+serde_with = "3.18.0"
+validator = { version = "0.20.0", features = ["derive"] }

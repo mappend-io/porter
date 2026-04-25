@@ -5,9 +5,10 @@ use super::range_reader::RangeReader;
 use super::{ArchiveIndexWeighter, BytesWeighter};
 use crate::s3_range_reader::S3RangeReader;
 use bytes::Bytes;
-use iri_string::types::UriAbsoluteStr;
+use iri_string::types::{UriAbsoluteStr, UriAbsoluteString};
 use quick_cache::sync::Cache;
 use regex::Regex;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
@@ -30,21 +31,31 @@ impl Default for ResourceLoaderConfig {
     fn default() -> Self {
         Self {
             max_readers: 8 * 1_024,
-            archive_index_cache_bytes: 1_024 * 1_024 * 1_024, // 1GiB
-            block_cache_bytes: 2 * 1_204 * 1_024 * 1_024,     // 2GiB
+            archive_index_cache_bytes: 2 * 1_024 * 1_024 * 1_024, // 2GiB
+            block_cache_bytes: 2 * 1_024 * 1_024 * 1_024,         // 2GiB
         }
     }
 }
 
 impl ResourceLoader {
     pub async fn new(config: ResourceLoaderConfig) -> Self {
+        // Archive size can vary significantly. As big as 100-400MB.
+        // Let's say it's 50MB on average.
+        let archive_index_cache_estimated_items =
+            config.archive_index_cache_bytes / (50 * (1 << 20));
         let archive_index_cache = Cache::with_weighter(
-            8_192,
+            archive_index_cache_estimated_items as usize,
             config.archive_index_cache_bytes,
             ArchiveIndexWeighter,
         );
 
-        let block_cache = Cache::with_weighter(32_768, config.block_cache_bytes, BytesWeighter);
+        // NOTE: Hardcoded 1MiB block size, aligned with caching range reader init below
+        let block_cache_estimated_items = config.block_cache_bytes / (1 << 20);
+        let block_cache = Cache::with_weighter(
+            block_cache_estimated_items as usize,
+            config.block_cache_bytes,
+            BytesWeighter,
+        );
 
         let s3_config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
         let s3_client = aws_sdk_s3::Client::new(&s3_config);
@@ -69,6 +80,17 @@ impl ResourceLoader {
         let parsed_uri = UriAbsoluteStr::new(uri)?;
         let reader = match parsed_uri.scheme_str() {
             "file" => {
+                /*
+                let file_reader = Arc::new(FileRangeReader::new(parsed_uri.path_str())?);
+                let caching_reader =
+                    Arc::new(crate::caching_range_reader::CachingRangeReader::new(
+                        file_reader,
+                        (1 << 20) * 1,                // TODO
+                        ArchiveIndex::hash_path(uri), // TODO
+                        self.block_cache.clone(),
+                    ));
+                Ok(caching_reader as Arc<dyn RangeReader>)
+                */
                 Ok(Arc::new(FileRangeReader::new(parsed_uri.path_str())?) as Arc<dyn RangeReader>)
             }
             "https" | "http" => todo!(),
@@ -242,12 +264,93 @@ impl ResourceLoader {
         }
     }
 
+    async fn compute_offset_for_uri(&self, uri: &UriAbsoluteStr) -> Option<u64> {
+        let (archive_path, content_path) = Self::split_archive_parts(uri.as_str())?;
+        let reader = self.get_reader_async(&archive_path).await.ok()?;
+        let index = self
+            .get_archive_index_async(&archive_path, reader)
+            .await
+            .ok()?;
+        let path_md5 = ArchiveIndex::hash_path(&content_path);
+
+        let base_idx = index
+            .entries
+            .binary_search_by(|e| ArchiveIndex::md5_compare(&e.path_md5, &path_md5))
+            .ok()?;
+
+        Some(index.entries[base_idx].offset)
+    }
+
     // TODO: Mostly useful if reading from an archive, we can lookup the paths and sort them by their order
     // in the file to maximize cache hits for blocks/reuse.
-    pub async fn read_many(_uris: Vec<&UriAbsoluteStr>) -> Vec<Result<Bytes, Error>> {
+    pub async fn read_many(
+        &self,
+        uris: &[&UriAbsoluteStr],
+    ) -> HashMap<UriAbsoluteString, Result<Bytes, Error>> {
         // Will need to reorder the results back to match the uris in the requested order.
-        // Or maybe return a map of uri to bytes?
-        todo!()
+
+        // TODO: Next step: group uris by archive uri, offset in archive.
+        // If uris aren't in archive, fine, can go into a catch-all group.
+        // Then work through them in that order.
+        //println!("OPTIMIZE THE ORDERING");
+
+        use std::collections::BTreeMap;
+
+        // Group: archive_path → Vec<(uri, offset_within_archive)>
+        let mut by_archive: BTreeMap<String, Vec<(UriAbsoluteString, u64)>> = BTreeMap::new();
+
+        for uri in uris {
+            let owned = UriAbsoluteStr::to_owned(*uri);
+            if let Some((archive_path, _)) = Self::split_archive_parts(uri.as_str()) {
+                let offset = self.compute_offset_for_uri(uri).await.unwrap_or(u64::MAX);
+                by_archive
+                    .entry(archive_path)
+                    .or_default()
+                    .push((owned, offset));
+            } else {
+                // Non-archive URI — handle separately, no sorting needed
+                by_archive
+                    .entry(String::new())
+                    .or_default()
+                    .push((owned, 0));
+            }
+        }
+
+        // Sort within each archive by offset, then flatten
+        let ordered: Vec<UriAbsoluteString> = by_archive
+            .into_values()
+            .flat_map(|mut group| {
+                group.sort_by_key(|(_, offset)| *offset);
+                group.into_iter().map(|(uri, _)| uri)
+            })
+            .collect();
+
+        use futures::stream::{self, StreamExt};
+        const CONCURRENCY: usize = 16;
+
+        stream::iter(ordered.into_iter().map(|uri| async move {
+            let result = self.read_async(uri.as_ref()).await;
+            (uri, result)
+        }))
+        .buffer_unordered(CONCURRENCY)
+        .collect()
+        .await
+
+        /*
+        let mut res = HashMap::new();
+        for uri in ordered {
+            res.insert(uri.clone(), self.read_async(&uri).await);
+        }
+        res
+        */
+
+        /*
+        let mut res = HashMap::new();
+        for uri in uris {
+            res.insert(UriAbsoluteStr::to_owned(*uri), self.read_async(&uri).await);
+        }
+        res
+        */
     }
 
     // Respect rules in https://github.com/Maxar-Public/3d-tiles/blob/wff1.7.0/extensions/MAXAR_content_3tz/1.0.0/README.md#path-resolver-algorithm
@@ -307,7 +410,7 @@ impl ResourceLoader {
                 let mut items = vec![];
                 for obj in res.contents() {
                     if let Some(key) = obj.key() {
-                        let stem = key.split('/').last().unwrap_or("");
+                        let stem = key.split('/').next_back().unwrap_or("");
                         if !stem.is_empty() {
                             items.push(stem.to_string());
                         }

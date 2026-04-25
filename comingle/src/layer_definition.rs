@@ -4,7 +4,7 @@ use crate::{
     tiles3d::{Asset, Content, RootProperty, Tile},
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 // TODO:
 // - Need to buffer the rects from tokens for synthesized tiles so the BVs are coherent
@@ -17,7 +17,10 @@ pub struct LayerDefinition {
     #[serde(skip)]
     pub id: String,
     pub source_uri_content_template: String,
-    pub source_s2_content_level: i32,
+    pub source_s2_content_package_level: i32,
+    pub source_s2_content_min_level: i32,
+    pub source_s2_content_max_level: i32,
+    pub source_s2_content_extension: String,
     pub source_s2_content_coverage_tokens: Vec<String>,
     pub root_geometric_error: f64,
     pub tileset_root_property: tiles3d::RootProperty,
@@ -32,6 +35,8 @@ pub struct LayerDefinition {
     pub asset_id: i64,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
+    pub content_transforms: BTreeSet<String>,
 }
 
 impl LayerDefinition {
@@ -146,21 +151,33 @@ impl LayerDefinition {
         let token = cell_id.to_token();
         let bounding_volume = s2_rect_to_region(&s2_token_to_s2_rect(&token), MIN_ELEV, MAX_ELEV);
         let content_token = cell_id
-            .parent(self.source_s2_content_level as u64)
+            .parent(self.source_s2_content_package_level as u64)
             .to_token();
         let content_union = self.coverage_cell_union();
 
         let mut children = vec![];
         let mut content = None;
-        if level < self.source_s2_content_level {
-            if self.base_globe_terrain_uri.is_some() {
+
+        if level < self.source_s2_content_min_level {
+            if self.base_globe_terrain_uri.is_some() && self.source_s2_content_extension == "glb" {
                 content = Some(tiles3d::Content {
                     uri: format!("../../../../bgc/{face}/{level}/{col}/{row}.glb",),
                     bounding_volume: None,
                     root_property: RootProperty::default(),
                 });
             }
+        } else if level <= self.source_s2_content_max_level {
+            content = Some(tiles3d::Content {
+                uri: format!(
+                    "../../../../c/{content_token}/{face}/{level}/{col}/{row}.{}",
+                    self.source_s2_content_extension
+                ),
+                bounding_volume: None,
+                root_property: RootProperty::default(),
+            });
+        }
 
+        if level < self.source_s2_content_max_level {
             for child_id in cell_id.children() {
                 // Skip it if there's no content coverage
                 if !content_union.intersects_cellid(&child_id) {
@@ -187,12 +204,6 @@ impl LayerDefinition {
                 };
                 children.push(child);
             }
-        } else if level == self.source_s2_content_level {
-            content = Some(tiles3d::Content {
-                uri: format!("../../../../c/{content_token}/tileset.json"),
-                bounding_volume: None,
-                root_property: RootProperty::default(),
-            });
         }
 
         let root = tiles3d::Tile {

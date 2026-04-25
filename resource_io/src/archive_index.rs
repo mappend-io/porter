@@ -1,7 +1,8 @@
 use crate::Error;
 use crate::range_reader::RangeReader;
+use bytemuck::{Pod, Zeroable};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Pod, Zeroable)]
 #[repr(C)]
 pub struct IndexEntry {
     pub path_md5: [u8; 16],
@@ -37,18 +38,9 @@ impl ArchiveIndex {
     }
 
     pub fn from_raw_bytes(raw_bytes: &[u8]) -> Self {
-        let mut entries = Vec::with_capacity(raw_bytes.len() / 24);
-
-        for chunk in raw_bytes.chunks_exact(24) {
-            let mut path_md5 = [0u8; 16];
-            path_md5.copy_from_slice(&chunk[0..16]);
-
-            let offset = u64::from_le_bytes(chunk[16..24].try_into().unwrap());
-
-            entries.push(IndexEntry { path_md5, offset });
+        Self {
+            entries: bytemuck::allocation::pod_collect_to_vec(raw_bytes),
         }
-
-        Self { entries }
     }
 
     // NOTE: This isn't handling md5 collisions. To do that properly would mean

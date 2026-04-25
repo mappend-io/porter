@@ -1,5 +1,6 @@
 use crate::tiles3d;
 use anyhow::Result;
+use glam::{DMat4, DVec3};
 use iri_string::types::{UriAbsoluteStr, UriAbsoluteString, UriReferenceStr};
 use resource_io::ResourceLoader;
 use serde::{Deserialize, Serialize};
@@ -149,4 +150,67 @@ pub fn sniff_content_type(bytes: &[u8]) -> &'static str {
         return "application/json";
     }
     "application/octet-stream"
+}
+
+// WGS84 ellipsoid parameters
+const WGS84_A: f64 = 6_378_137.0;
+const WGS84_F: f64 = 1.0 / 298.257_223_563;
+const WGS84_E2: f64 = WGS84_F * (2.0 - WGS84_F);
+
+fn geodetic_to_ecef(lon_deg: f64, lat_deg: f64, height_m: f64) -> DVec3 {
+    let lon = lon_deg.to_radians();
+    let lat = lat_deg.to_radians();
+
+    let (sin_lat, cos_lat) = lat.sin_cos();
+    let (sin_lon, cos_lon) = lon.sin_cos();
+
+    let n = WGS84_A / (1.0 - WGS84_E2 * sin_lat * sin_lat).sqrt();
+
+    DVec3::new(
+        (n + height_m) * cos_lat * cos_lon,
+        (n + height_m) * cos_lat * sin_lon,
+        (n * (1.0 - WGS84_E2) + height_m) * sin_lat,
+    )
+}
+
+/// Return (east, north, up) orthonormal basis vectors at point
+/// TODO: Add elevation to shift enu origin
+fn enu_basis(lon_deg: f64, lat_deg: f64) -> (DVec3, DVec3, DVec3) {
+    let lon = lon_deg.to_radians();
+    let lat = lat_deg.to_radians();
+    let (sin_lat, cos_lat) = lat.sin_cos();
+    let (sin_lon, cos_lon) = lon.sin_cos();
+
+    let east = DVec3::new(-sin_lon, cos_lon, 0.0);
+    let north = DVec3::new(-sin_lat * cos_lon, -sin_lat * sin_lon, cos_lat);
+    let up = DVec3::new(cos_lat * cos_lon, cos_lat * sin_lon, sin_lat);
+
+    (east, north, up)
+}
+
+pub fn local_to_ecef(lon_deg: f64, lat_deg: f64, height_m: f64) -> DMat4 {
+    let origin = geodetic_to_ecef(lon_deg, lat_deg, height_m);
+    let (east, north, up) = enu_basis(lon_deg, lat_deg);
+
+    // Columns: local X-axis, local Y-axis, local Z-axis, translation.
+    DMat4::from_cols(
+        east.extend(0.0),     // local +X → East
+        up.extend(0.0),       // local +Y → Up
+        (-north).extend(0.0), // local +Z → South (so -Z is North = "forward" in glTF)
+        origin.extend(1.0),   // translation to ECEF position
+    )
+}
+
+pub fn local_to_ecef_with_rotation(
+    lon_deg: f64,
+    lat_deg: f64,
+    elev_m: f64,
+    _rot_x_deg: f64,
+    rot_y_deg: f64,
+    _rot_z_deg: f64,
+) -> DMat4 {
+    let placement = local_to_ecef(lon_deg, lat_deg, elev_m);
+    // TODO: Make sure caller is mapping AOO to this rotation properly
+    let heading = DMat4::from_rotation_y(-rot_y_deg.to_radians());
+    placement * heading
 }

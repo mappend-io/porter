@@ -70,6 +70,7 @@ impl RangeReader for S3RangeReader {
         })?;
 
         trace!(
+            //println!(
             "Reading {} bytes from offset {} for s3://{}/{}",
             length, offset, self.bucket, self.key
         );

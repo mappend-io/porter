@@ -121,8 +121,12 @@ locate source content. To accomplish this, several key elements are necessary:
   data. This is a templated string, the `{CONTENT_ROOT_TOKEN}` is replaced by
   the S2 token at the `sourceS2ContentLevel`.
   - See [URI notes](#URI-notes) for more details
-- `sourceS2ContentLevel`: All tiled source data must exist at this uniform S2
-  level
+- `sourceS2ContentPackageLevel`: All tiled source data must exist at this
+  uniform S2 level
+- `sourceS2ContentMinLevel`: The lowest level of complete content in source data
+- `sourceS2ContentMaxLevel`: The highest level of complete content in source
+  data
+- `sourceS2ContentExtension`: Either `glb` or `geojson`
 - `sourceS2ContentCoverageTokens`: An array of S2 tokens describing the area
   covered by source data. This *could* be each populated S2 L7, but it is better
   to provide a normalized cell union to roll up larger areas with fewer tokens.
@@ -135,6 +139,9 @@ locate source content. To accomplish this, several key elements are necessary:
 - `tilesetExtensionsRequired`: Set to `["MAXAR_content_geojson"]` if exposing a
   vector dataset, otherwise leave it as an empty array
 - `description`: An optional string to include in the layer list.
+- `assetId`: For emulation, a numeric ID for this asset. Be sure to use a unique
+  value for each layer.
+- `contentTransforms`: A list of content transformations to apply
 
 The remaining fields can be set as described in the sample below and are
 reserved for future use.
@@ -145,16 +152,43 @@ A sample layer definition:
 {
     "description": "A sample terrain layer",
     "sourceUriContentTemplate": "s3://bucket/prefix/{CONTENT_ROOT_TOKEN}/terrain.3tz",
-    "sourceS2ContentLevel": 7,
+    "sourceS2ContentPackageLevel": 7,
+    "sourceS2ContentMinLevel": 7,
+    "sourceS2ContentMaxLevel": 12,
+    "sourceS2ContentExtension": "glb",
     "sourceS2ContentCoverageTokens": ["1", "3", "5", "7", "9", "b"],
     "baseGlobeTerrainUri": "s3://bucket/prefix/base_globe/terrain.3tz",
-    "rootGeometricError": 4096,
+    "rootGeometricError": 131072,
     "tilesetRootProperty": {},
     "tilesetExtensionsUsed": [],
     "tilesetExtensionsRequired": [],
     "tilesetMetadata": {},
     "tilesetSchema": {},
-    "version": 0
+    "version": 0,
+    "assetId": 0
+}
+```
+
+A more complex layer that inlines referenced models:
+
+```json
+{
+    "description": "A sampler layer with inlined building models",
+    "sourceUriContentTemplate": "s3://bucket/prefix/{CONTENT_ROOT_TOKEN}/BuildingPnt.3tz",
+    "sourceS2ContentPackageLevel": 7,
+    "sourceS2ContentMinLevel": 12,
+    "sourceS2ContentMaxLevel": 12,
+    "sourceS2ContentExtension": "glb",
+    "sourceS2ContentCoverageTokens": ["1", "3", "5", "7", "9", "b"],
+    "rootGeometricError": 16384,
+    "tilesetRootProperty": {},
+    "tilesetExtensionsUsed": [],
+    "tilesetExtensionsRequired": [],
+    "tilesetMetadata": {},
+    "tilesetSchema": {},
+    "version": 0,
+    "assetId": 1,
+    "contentTransforms": ["inline_owt_referenced_models"]
 }
 ```
 
