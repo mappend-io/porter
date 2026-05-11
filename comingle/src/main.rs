@@ -116,7 +116,9 @@ async fn main() -> Result<()> {
         ),
     };
 
-    let app = app.layer(TraceLayer::new_for_http());
+    let app = app
+        .layer(from_fn(security_headers))
+        .layer(TraceLayer::new_for_http());
 
     info!("🚀 Listening on {}", app_state.config.listen_addr);
 

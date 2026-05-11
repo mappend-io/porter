@@ -19,3 +19,34 @@ pub async fn cache_forever(req: Request<Body>, next: Next) -> impl IntoResponse 
     );
     res
 }
+
+pub async fn security_headers(req: Request<Body>, next: Next) -> impl IntoResponse {
+    use axum::http::HeaderValue;
+
+    let mut response = next.run(req).await;
+    let headers = response.headers_mut();
+
+    headers.insert(
+        "Content-Security-Policy",
+        HeaderValue::from_static(
+            "default-src 'self'; \
+             script-src 'self' 'unsafe-eval'; \
+             object-src 'none'; \
+             base-uri 'self'; \
+             img-src 'self' data:; \
+             style-src 'self' 'unsafe-inline'; \
+             frame-ancestors 'none';",
+        ),
+    );
+    headers.insert("X-Frame-Options", HeaderValue::from_static("DENY"));
+    headers.insert(
+        "X-Content-Type-Options",
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        "Referrer-Policy",
+        HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
+
+    response
+}
