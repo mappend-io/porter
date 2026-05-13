@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["comingle", "gltf_io", "gltf_arc", "gltf_types", "resource_io", "transforms"]
+members = ["comingle", "gltf_io", "gltf_arc", "gltf_types", "resource_io", "transforms", "terrarium"]
 
 [workspace.package]
 version = "0.1.0"
@@ -14,6 +14,7 @@ gltf_arc = { path = "gltf_arc" }
 gltf_io = { path = "gltf_io" }
 gltf_types = { path = "gltf_types" }
 resource_io = { path = "resource_io" }
+terrarium = { path = "terrarium" }
 transforms = { path = "transforms" }
 
 [profile.release]

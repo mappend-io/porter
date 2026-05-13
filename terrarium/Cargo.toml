@@ -1,0 +1,20 @@
+[package]
+name = "terrarium"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = "1.0.102"
+bytemuck = "1.25.0"
+bytes = "1.11.1"
+futures = "0.3.32"
+glam = { version = "0.32.1", features = ["bytemuck"] }
+iri-string = "0.7.12"
+png = "0.18.1"
+regex = "1.12.3"
+resource_io = { workspace = true }
+s2 = "0.0.13"
+tokio = { version = "1.52.1", features = ["rt", "macros"] }
+tracing = "0.1.44"

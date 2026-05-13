@@ -363,3 +363,62 @@ pub async fn get_base_globe_terrain_payload(
 
     Ok((headers, bytes))
 }
+
+#[derive(Debug, Deserialize)]
+pub struct GetTerrariumTilePaths {
+    pub id: String,
+    pub zoom: i32,
+    pub x: i32,
+    pub y: String,
+}
+
+pub async fn get_terrarium_tile(
+    State(app_state): State<AppState>,
+    Path(paths): Path<GetTerrariumTilePaths>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let actual_y: i32 = paths
+        .y
+        .strip_suffix(".png")
+        .ok_or(StatusCode::NOT_FOUND)?
+        .parse()
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    let layer_def = app_state
+        .get_layer_definition(&paths.id)
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    if layer_def.elevation_png_content.is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let raster_png_uri = format!(
+        // HACK: This only works for a .3tz. We should probably push /tileset.json if it's .3tz,
+        // then strip the path in any case to get the root "dir".
+        "{}/{}",
+        layer_def.source_uri_content_template,
+        layer_def.elevation_png_content.clone().unwrap()
+    );
+
+    let index = terrarium::MapzenTileIndex {
+        zoom: paths.zoom,
+        col: paths.x,
+        row: actual_y,
+    };
+
+    let bytes = terrarium::build_terrarium_rgb_tile(
+        app_state.resource_loader.clone(),
+        &raster_png_uri,
+        layer_def.source_s2_content_package_level,
+        &index,
+    )
+    .await
+    // TODO: We should probably backfill here instead
+    .unwrap_or_else(|_| terrarium::make_empty_tile(&index));
+
+    let content_type = "image/png";
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+
+    Ok((headers, bytes))
+}

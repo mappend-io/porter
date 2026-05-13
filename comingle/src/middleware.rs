@@ -31,9 +31,10 @@ pub async fn security_headers(req: Request<Body>, next: Next) -> impl IntoRespon
         HeaderValue::from_static(
             "default-src 'self'; \
              script-src 'self' 'unsafe-eval'; \
+             worker-src blob:; \
              object-src 'none'; \
              base-uri 'self'; \
-             img-src 'self' data:; \
+             img-src 'self' data: blob:; \
              style-src 'self' 'unsafe-inline'; \
              frame-ancestors 'none';",
         ),

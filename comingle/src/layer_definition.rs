@@ -37,6 +37,10 @@ pub struct LayerDefinition {
     pub description: Option<String>,
     #[serde(default)]
     pub content_transforms: BTreeSet<String>,
+
+    // Like: `dtm/{FACE}/{LEVEL}/{COL}/{ROW}.png`
+    #[serde(default)]
+    pub elevation_png_content: Option<String>,
 }
 
 impl LayerDefinition {

@@ -31,6 +31,9 @@ pub mod utils;
 #[cfg(feature = "embedded-viewer")]
 pub mod viewer;
 
+#[cfg(feature = "embedded-viewer")]
+pub mod terrarium_viewer;
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Slurp from .env
@@ -93,6 +96,7 @@ async fn main() -> Result<()> {
             "/{id}/{hash}/bgc/{*rest}",
             get(get_base_globe_terrain_payload),
         )
+        .route("/terrarium/{id}/{zoom}/{x}/{y}", get(get_terrarium_tile))
         .route_layer(from_fn(cache_forever));
 
     let app = Router::new()
@@ -102,6 +106,17 @@ async fn main() -> Result<()> {
 
     #[cfg(feature = "embedded-viewer")]
     let app = app.fallback(viewer::static_handler);
+
+    #[cfg(feature = "embedded-viewer")]
+    let app = app
+        .route(
+            "/terrarium_viewer/{id}",
+            get(terrarium_viewer::index_handler),
+        )
+        .route(
+            "/terrarium_viewer/assets/{*path}",
+            get(terrarium_viewer::asset_handler),
+        );
 
     let app = app.with_state(app_state.clone());
 

@@ -78,7 +78,7 @@ Note that while options may be provided several ways, the precedence is
 - Environment variables
 - `.env` variables
 
-## Bundled viewer
+## Bundled CesiumJS viewer
 
 Comingle includes a bundled CesiumJS environment. Pass query parameters in the
 URL to load one or more layers:
@@ -106,6 +106,28 @@ async function loadLayer(id) {
   viewer.scene.primitives.add(tileset);
   return tileset;
 }
+```
+
+## Mapzen Terrarium endpoint
+
+If `elevationPngContent` is provided in a layer, a Mapzen Terrarium endpoint
+will be exposed at:
+
+```text
+http://localhost:3200/terrarium/my-layer/{z}/{x}/{y}.png
+```
+
+The images are compatible with [Terrarium RGB
+encoding](https://github.com/tilezen/joerd/blob/master/docs/formats.md#terrarium)
+in Web Mercator projection (EPSG:3857).
+
+## Bundled MaplibreGL JS viewer for Mapzen Terrarium tiles
+
+Comingle includes a bundled MaplibreGL environment. Elevation data may be
+previewed using the URL format:
+
+```text
+http://localhost:3200/terrarium_viewer/my-layer
 ```
 
 ## Layer definitions
@@ -142,6 +164,10 @@ locate source content. To accomplish this, several key elements are necessary:
 - `assetId`: For emulation, a numeric ID for this asset. Be sure to use a unique
   value for each layer.
 - `contentTransforms`: A list of content transformations to apply
+- `elevationPngContent`: Path to elevation RGB PNGs within the content, if
+  present. If defined, a Mapzen Terrarium endpoint will be exposed. The tokens
+  `{FACE}`, `{LEVEL}`, `{COL}` and `{ROW}` will be substituted. Example:
+  `dtm/{FACE}/{LEVEL}/{COL}/{ROW}.png`.
 
 The remaining fields can be set as described in the sample below and are
 reserved for future use.
@@ -158,6 +184,7 @@ A sample layer definition:
     "sourceS2ContentExtension": "glb",
     "sourceS2ContentCoverageTokens": ["1", "3", "5", "7", "9", "b"],
     "baseGlobeTerrainUri": "s3://bucket/prefix/base_globe/terrain.3tz",
+    "elevationPngContent": "dtm/{FACE}/{LEVEL}/{COL}/{ROW}.png",
     "rootGeometricError": 131072,
     "tilesetRootProperty": {},
     "tilesetExtensionsUsed": [],
