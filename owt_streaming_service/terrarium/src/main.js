@@ -12,6 +12,8 @@ function getInitialView() {
     lon: parseFloat(params.get("lon")) || 120.6063,
     lat: parseFloat(params.get("lat")) || 24.0493,
     zoom: parseFloat(params.get("zoom")) || 12,
+    pitch: parseFloat(params.get("pitch")) || 0,
+    bearing: parseFloat(params.get("bearing")) || 0,
   };
 }
 
@@ -22,6 +24,19 @@ function updateURL() {
   params.set("lon", center.lng.toFixed(5));
   params.set("lat", center.lat.toFixed(5));
   params.set("zoom", zoom.toFixed(2));
+  const pitch = map.getPitch();
+  const bearing = map.getBearing();
+  // Only include these if they aren't defaults, keeps normal top-down urls clean
+  if (pitch > 0.5) {
+    params.set("pitch", pitch.toFixed(1));
+  } else {
+    params.delete("pitch");
+  }
+  if (Math.abs(bearing) > 0.5) {
+    params.set("bearing", bearing.toFixed(1));
+  } else {
+    params.delete("bearing");
+  }
   window.history.replaceState(
     null,
     "",
@@ -93,10 +108,14 @@ const map = new maplibregl.Map({
   },
   center: [initial.lon, initial.lat],
   zoom: initial.zoom,
+  pitch: initial.pitch,
+  bearing: initial.bearing,
   maxPitch: 85,
 });
 
 map.on("moveend", updateURL);
+map.on("pitchend", updateURL);
+map.on("rotateend", updateURL);
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }));
 map.addControl(new maplibregl.ScaleControl());
 
