@@ -6,6 +6,13 @@ be stored in 3TZ archives. OSS serves tilesets over HTTP for use with
 CesiumJS, Cesium for Unreal, Cesium for Unity, and other 3D Tiles consumers,
 and includes a bundled CesiumJS viewer for quick inspection.
 
+It also transforms data on the fly to expose it via compatibility endpoints for
+non-3D Tiles consumers. Today, Mapzen Terrarium RGB elevation and WMTS Simple
+imagery layers are exposed.
+
+3D Tiles glTF content can also be transformed on the fly before it sent to the
+consumer.
+
 ## Quick start
 
 - Create [layer definitions](#Layer-definitions), one per file, at `/path/to/layers`
@@ -121,10 +128,21 @@ The images are compatible with [Terrarium RGB
 encoding](https://github.com/tilezen/joerd/blob/master/docs/formats.md#terrarium)
 in Web Mercator projection (EPSG:3857).
 
-## Bundled MaplibreGL JS viewer for Mapzen Terrarium tiles
+## WMTS Simple imagery endpoint
 
-OSS includes a bundled MaplibreGL environment. Elevation data may be previewed
-using the URL format:
+If `imageryRasterContent` is provided in a layer, a WMTS Simple imagery endpoint
+will be exposed at:
+
+```text
+http://localhost:3200/wmts/my-layer/{z}/{x}/{y}.jpg
+```
+
+The images are 256x256px in Web Mercator projection (EPSG:3857).
+
+## Bundled MaplibreGL JS viewer for Mapzen Terrarium/WMTS imagery tiles
+
+OSS includes a bundled MaplibreGL environment. Elevation and imagery data may be
+previewed using the URL format:
 
 ```text
 http://localhost:3200/terrarium_viewer/my-layer
@@ -167,6 +185,10 @@ locate source content. To accomplish this, several key elements are necessary:
   rasters within the content, if present. If defined, a Mapzen Terrarium
   endpoint will be exposed. The tokens `{FACE}`, `{LEVEL}`, `{COL}` and `{ROW}`
   will be substituted. Example: `dtm/{FACE}/{LEVEL}/{COL}/{ROW}.tif`.
+- `imageryRasterContent`: Path to JPG rasters within the content, if present. If
+  defined, a WMTS Simple endpoint. The tokens `{FACE}`, `{LEVEL}`, `{COL}` and
+  `{ROW}` will be substituted. Example:
+  `imagery/{FACE}/{LEVEL}/{COL}/{ROW}.jpg`.
 
 The remaining fields can be set as described in the sample below and are
 reserved for future use.
@@ -184,6 +206,7 @@ A sample layer definition:
     "sourceS2ContentCoverageTokens": ["1", "3", "5", "7", "9", "b"],
     "baseGlobeTerrainUri": "s3://bucket/prefix/base_globe/terrain.3tz",
     "elevationRasterContent": "dtm/{FACE}/{LEVEL}/{COL}/{ROW}.tif",
+    "imageryRasterContent": "imagery/{FACE}/{LEVEL}/{COL}/{ROW}.jpg",
     "rootGeometricError": 131072,
     "tilesetRootProperty": {},
     "tilesetExtensionsUsed": [],
