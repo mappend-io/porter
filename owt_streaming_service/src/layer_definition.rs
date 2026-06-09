@@ -39,7 +39,7 @@ pub struct LayerDefinition {
     pub content_transforms: BTreeSet<String>,
 
     // Like: `dtm/{FACE}/{LEVEL}/{COL}/{ROW}.tif`
-    #[serde(default, alias = "elevation_png_content")]
+    #[serde(default, alias = "elevationPngContent")]
     pub elevation_raster_content: Option<String>,
 }
 
