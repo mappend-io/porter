@@ -34,7 +34,8 @@ pub async fn security_headers(req: Request<Body>, next: Next) -> impl IntoRespon
              worker-src blob:; \
              object-src 'none'; \
              base-uri 'self'; \
-             img-src 'self' data: blob:; \
+             img-src 'self' data: blob: https://*.tile.openstreetmap.org; \
+             connect-src 'self' https://*.tile.openstreetmap.org; \
              style-src 'self' 'unsafe-inline'; \
              frame-ancestors 'none';",
         ),

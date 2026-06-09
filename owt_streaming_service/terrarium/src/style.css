@@ -26,3 +26,52 @@ body {
     padding: 1px 4px;
     border-radius: 2px;
 }
+
+#layer-controls {
+    position: absolute;
+    top: 90px;
+    left: 10px;
+    z-index: 1;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 6px;
+    padding: 8px;
+    font-family: system-ui, sans-serif;
+    font-size: 13px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+#layer-controls label {
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    color: #666;
+}
+
+#layer-controls button {
+    border: 1px solid #ccc;
+    background: #fff;
+    border-radius: 4px;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+#layer-controls button.active {
+    background: #3b82f6;
+    color: #fff;
+    border-color: #3b82f6;
+}
+
+#layer-controls button:hover:not(.active) {
+    background: #f0f0f0;
+}
+
+#base-toggle,
+#hillshade-control {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
