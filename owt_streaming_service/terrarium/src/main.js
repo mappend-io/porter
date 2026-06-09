@@ -6,6 +6,31 @@ const id = window.location.pathname.split("/").filter(Boolean)[1];
 const TILE_URL = `/terrarium/${id}/{z}/{x}/{y}.png`;
 const IMAGERY_URL = `/wmts/${id}/{z}/{x}/{y}.jpg`;
 
+function getInitialView() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    lon: parseFloat(params.get("lon")) || 120.6063,
+    lat: parseFloat(params.get("lat")) || 24.0493,
+    zoom: parseFloat(params.get("zoom")) || 12,
+  };
+}
+
+function updateURL() {
+  const center = map.getCenter();
+  const zoom = map.getZoom();
+  const params = new URLSearchParams(window.location.search);
+  params.set("lon", center.lng.toFixed(5));
+  params.set("lat", center.lat.toFixed(5));
+  params.set("zoom", zoom.toFixed(2));
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}?${params}`,
+  );
+}
+
+const initial = getInitialView();
+
 const map = new maplibregl.Map({
   container: "map",
   aroundCenter: false,
@@ -66,11 +91,12 @@ const map = new maplibregl.Map({
       },
     ],
   },
-  center: [120.6063, 24.0493],
-  zoom: 12,
+  center: [initial.lon, initial.lat],
+  zoom: initial.zoom,
   maxPitch: 85,
 });
 
+map.on("moveend", updateURL);
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }));
 map.addControl(new maplibregl.ScaleControl());
 
