@@ -2,6 +2,7 @@ use super::Error;
 use super::range_reader::RangeReader;
 use async_trait::async_trait;
 use bytes::Bytes;
+use metrics::counter;
 use std::fs::File;
 use std::sync::Arc;
 use tokio::task;
@@ -62,6 +63,9 @@ impl RangeReader for FileRangeReader {
             })
         })
         .await;
+
+        counter!("file_range_reads_total").increment(1);
+        counter!("file_range_read_bytes_total").increment(actual_length as u64);
 
         // Flatten the Result returned by spawn_blocking
         match result {

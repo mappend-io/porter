@@ -3,6 +3,7 @@ use super::range_reader::RangeReader;
 use async_trait::async_trait;
 use aws_sdk_s3::Client;
 use bytes::Bytes;
+use metrics::counter;
 use tracing::trace;
 
 pub struct S3RangeReader {
@@ -74,6 +75,9 @@ impl RangeReader for S3RangeReader {
             "Reading {} bytes from offset {} for s3://{}/{}",
             length, offset, self.bucket, self.key
         );
+
+        counter!("s3_range_reads_total").increment(1);
+        counter!("s3_range_read_bytes_total").increment(actual_length);
 
         Ok(aggregated_bytes.into_bytes())
     }

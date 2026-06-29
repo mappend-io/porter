@@ -37,6 +37,8 @@ Options:
           Public base url [env: BASE_URL=]
       --cors-origin <CORS_ORIGIN>
           Allow CORS from a specific origin, or "*" for any [env: CORS_ORIGIN=*]
+      --metrics-listen-addr <METRICS_LISTEN_ADDR>
+          Prometheus metrics listen address [env: METRICS_LISTEN_ADDR=]
       --layer-config-uri <LAYER_CONFIG_URI>
           Location of layer configuration JSON documents [env: LAYER_CONFIG_URI=]
       --layer-definition-ttl <LAYER_DEFINITION_TTL>
@@ -76,6 +78,7 @@ LISTEN_ADDR=0.0.0.0:3200
 LAYER_CONFIG_URI=file:///path/to/layers/
 # Or, if using S3:
 #LAYER_CONFIG_URI=s3://my-bucket/prefix/layers/
+METRICS_LISTEN_ADDR=0.0.0.0:9000
 ```
 
 Note that while options may be provided several ways, the precedence is

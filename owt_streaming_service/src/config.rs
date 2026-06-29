@@ -26,6 +26,10 @@ pub struct Config {
     #[arg(long, env = "CORS_ORIGIN")]
     pub cors_origin: Option<String>,
 
+    /// Prometheus metrics listen address
+    #[arg(long, env = "METRICS_LISTEN_ADDR")]
+    pub metrics_listen_addr: Option<String>,
+
     /// Location of layer configuration JSON documents
     #[arg(long, env = "LAYER_CONFIG_URI")]
     pub layer_config_uri: String,

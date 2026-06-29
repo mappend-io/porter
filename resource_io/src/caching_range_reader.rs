@@ -3,6 +3,7 @@ use super::{BytesWeighter, Error};
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use futures::future::try_join_all;
+use metrics::counter;
 use quick_cache::sync::Cache;
 use std::sync::Arc;
 
@@ -31,12 +32,18 @@ impl CachingRangeReader {
     async fn fetch_block_async(&self, block_index: u64) -> Result<Bytes, Error> {
         let key = (self.cache_namespace, block_index);
         let cache_result = self.cache.get_value_or_guard_async(&key).await;
+        counter!("caching_range_reader_queries").increment(1);
 
         // If we already have the result, early out, otherwise take a guard
         let guard = match cache_result {
-            Ok(bytes) => return Ok(bytes),
+            Ok(bytes) => {
+                counter!("caching_range_reader_hits").increment(1);
+                return Ok(bytes);
+            }
             Err(guard) => guard,
         };
+
+        counter!("caching_range_reader_misses").increment(1);
 
         let file_size = self.size();
         let fetch_offset = block_index * self.block_size;
@@ -57,7 +64,7 @@ impl CachingRangeReader {
             .read_range_async(fetch_offset, fetch_length)
             .await?;
 
-        // Add to the cachce, resolve guards for other waiters
+        // Add to the cache, resolve guards for other waiters
         let _ = guard.insert(block_data.clone());
 
         Ok(block_data)

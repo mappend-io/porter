@@ -45,6 +45,24 @@ async fn main() -> Result<()> {
     // Setup logging
     logging::setup_logging(&config.log_level, config.pretty_log);
 
+    // Setup metrics listener
+    let metrics_addr: Option<std::net::SocketAddr> = config
+        .metrics_listen_addr
+        .as_deref()
+        .map(str::parse)
+        .transpose()
+        .expect("invalid metrics listen address");
+
+    if let Some(addr) = metrics_addr {
+        info!("Prometheus metrics listening on {:?}", addr);
+        metrics_exporter_prometheus::PrometheusBuilder::new()
+            .with_http_listener(addr)
+            .install()
+            .expect("failed to install Prometheus recorder");
+    }
+
+    let prometheus_layer = axum_prometheus::PrometheusMetricLayer::new();
+
     // Using moka here to get ttl
     let layer_definition_cache = Cache::builder()
         .time_to_live(config.layer_definition_ttl)
@@ -103,7 +121,8 @@ async fn main() -> Result<()> {
     let app = Router::new()
         .merge(compat_routes)
         .merge(short_cache_routes)
-        .merge(long_cache_routes);
+        .merge(long_cache_routes)
+        .layer(prometheus_layer);
 
     #[cfg(feature = "embedded-viewer")]
     let app = app.fallback(viewer::static_handler);

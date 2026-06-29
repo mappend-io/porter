@@ -7,6 +7,7 @@ use axum::response::IntoResponse;
 use axum::{Json, extract::Path, extract::State, http::StatusCode};
 use geojson::{GeoJson, Geometry, GeometryValue};
 use iri_string::types::{UriAbsoluteStr, UriReferenceStr, UriRelativeStr};
+use metrics::counter;
 use serde::{Deserialize, Serialize};
 use transforms::combine_referenced_models::*;
 
@@ -219,6 +220,8 @@ pub async fn get_content_payload(
             GeoJson::Geometry(_) => todo!(),
         };
 
+        let mut instance_count = 0_u64;
+
         for feature in &features {
             if let Some(Geometry {
                 value: GeometryValue::MultiPoint { coordinates },
@@ -314,6 +317,12 @@ pub async fn get_content_payload(
 
         bytes = gltf_io::write::create_glb(&raw_doc.0)
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        counter!("transform_inline_owt_referenced_models_tiles_total").increment(1);
+        counter!("transform_inline_owt_referenced_models_unique_models_total")
+            .increment(referenced_models.len() as u64);
+        //counter!("transform_inline_owt_referenced_models_unique_instances_total")
+        //    .increment(features.len() as u64);
     }
 
     // TODO: If the payload is a tileset, we need to (temporarily, until CesiumJS is fixed), strip the tileset metadata and schema.
@@ -322,6 +331,9 @@ pub async fn get_content_payload(
     let content_type = sniff_content_type(&bytes);
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+
+    // TODO: Add s2_level
+    counter!("content_3dtiles_tiles_total").increment(1);
 
     Ok((headers, bytes))
 }
@@ -360,6 +372,9 @@ pub async fn get_base_globe_terrain_payload(
     let content_type = sniff_content_type(&bytes);
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+
+    // TODO: Would be nice to capture s2 level here
+    counter!("low_res_globe_passthrough_tiles_total").increment(1);
 
     Ok((headers, bytes))
 }
@@ -420,6 +435,8 @@ pub async fn get_terrarium_tile(
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
 
+    counter!("terrarium_tiles_total", "zoom_level" => paths.zoom.to_string()).increment(1);
+
     Ok((headers, bytes))
 }
 
@@ -478,6 +495,8 @@ pub async fn get_wmts_simple_imagery(
     let content_type = "image/jpg";
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+
+    counter!("wmts_simple_tiles_total", "zoom_level" => paths.zoom.to_string()).increment(1);
 
     Ok((headers, bytes))
 }
