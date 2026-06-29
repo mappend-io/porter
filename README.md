@@ -45,6 +45,10 @@ Options:
           [env: LAYER_DEFINITION_TTL=] [default: 5m]
       --block-cache-size <BLOCK_CACHE_SIZE>
           [env: BLOCK_CACHE_SIZE=] [default: 2GiB]
+      --tls-cert <TLS_CERT>
+          TLS certificate file path [env: TLS_CERT=]
+      --tls-key <TLS_KEY>
+          TLS private key file path [env: TLS_KEY=]
   -h, --help
           Print help
 ```

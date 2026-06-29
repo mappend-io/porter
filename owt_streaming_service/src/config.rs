@@ -41,6 +41,14 @@ pub struct Config {
     // Bound resource loader block cache
     #[arg(long, env, default_value = "2GiB")]
     pub block_cache_size: ByteSize,
+
+    /// TLS certificate file path
+    #[arg(long, env = "TLS_CERT", requires = "tls_key")]
+    pub tls_cert: Option<String>,
+
+    /// TLS private key file path
+    #[arg(long, env = "TLS_KEY", requires = "tls_cert")]
+    pub tls_key: Option<String>,
 }
 
 impl Config {

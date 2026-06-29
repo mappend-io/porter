@@ -162,10 +162,27 @@ async fn main() -> Result<()> {
 
     info!("🚀 Listening on {}", app_state.config.listen_addr);
 
-    let listener = TcpListener::bind(config.listen_addr).await?;
-    let _ = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await;
+    if let (Some(cert_path), Some(key_path)) = (&config.tls_cert, &config.tls_key) {
+        info!("Using TLS (cert: {}, key: {})", cert_path, key_path);
+        let tls_config = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert_path, key_path)
+            .await
+            .context("Failed to load TLS certificates")?;
+
+        let addr: std::net::SocketAddr = config
+            .listen_addr
+            .parse()
+            .context("Invalid listen_addr for axum_server")?;
+
+        axum_server::bind_rustls(addr, tls_config)
+            .serve(app.into_make_service())
+            .await?;
+    } else {
+        let listener = TcpListener::bind(&config.listen_addr).await?;
+
+        let _ = axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown_signal())
+            .await;
+    }
 
     Ok(())
 }
