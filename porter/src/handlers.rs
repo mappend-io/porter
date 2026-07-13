@@ -423,6 +423,16 @@ pub async fn get_terrarium_tile(
         layer_def.elevation_raster_content.clone().unwrap()
     );
 
+    let fallback_raster_png_uri = layer_def.base_globe_terrain_uri.as_ref().map(|uri| {
+        format!(
+            // HACK: This only works for a .3tz. We should probably push /tileset.json if it's .3tz,
+            // then strip the path in any case to get the root "dir".
+            "{}/{}",
+            uri,
+            layer_def.elevation_raster_content.clone().unwrap()
+        )
+    });
+
     let index = terrarium::MapzenTileIndex {
         zoom: paths.zoom,
         col: paths.x,
@@ -432,6 +442,7 @@ pub async fn get_terrarium_tile(
     let bytes = terrarium::build_terrarium_rgb_tile(
         app_state.resource_loader.clone(),
         &raster_png_uri,
+        fallback_raster_png_uri,
         layer_def.source_s2_content_package_level,
         &index,
     )
@@ -484,6 +495,16 @@ pub async fn get_wmts_simple_imagery(
         layer_def.imagery_raster_content.clone().unwrap()
     );
 
+    let fallback_raster_png_uri = layer_def.base_globe_terrain_uri.as_ref().map(|uri| {
+        format!(
+            // HACK: This only works for a .3tz. We should probably push /tileset.json if it's .3tz,
+            // then strip the path in any case to get the root "dir".
+            "{}/{}",
+            uri,
+            layer_def.imagery_raster_content.clone().unwrap()
+        )
+    });
+
     let index = terrarium::MapzenTileIndex {
         zoom: paths.zoom,
         col: paths.x,
@@ -493,6 +514,7 @@ pub async fn get_wmts_simple_imagery(
     let bytes = terrarium::build_simple_wmts_imagery_tile(
         app_state.resource_loader.clone(),
         &raster_png_uri,
+        fallback_raster_png_uri,
         layer_def.source_s2_content_package_level,
         &index,
     )

@@ -358,6 +358,7 @@ pub fn make_empty_tile(index: &MapzenTileIndex) -> Bytes {
 pub async fn build_terrarium_rgb_tile(
     resource_loader: resource_io::ResourceLoader,
     raster_template_uri: &str, // Path to rasters, we replace {CONTENT_ROOT_TOKEN}, {FACE}, {LEVEL}, {COL}, {ROW}
+    fallback_raster_template_uri: Option<String>,
     s2_content_package_level: i32,
     index: &MapzenTileIndex,
 ) -> Result<Bytes> {
@@ -376,9 +377,9 @@ pub async fn build_terrarium_rgb_tile(
         s2_raster_level
     );
 
-    if s2_raster_level < s2_content_package_level {
+    if s2_raster_level < s2_content_package_level && fallback_raster_template_uri.is_none() {
         // Maybe just make an HAE=0 version and return it?
-        bail!("TODO: Need to pull from coarse raster for this");
+        bail!("Nothing to do: no fallback raster")
     }
 
     // Find S2 coverage at S2 raster level
@@ -392,13 +393,19 @@ pub async fn build_terrarium_rgb_tile(
     // FUTURE OPTIMIZATION: Sort S2 raster tokens by S2 content token bins, just
     // to optimize cache locality
 
+    let uri = if s2_raster_level < s2_content_package_level {
+        fallback_raster_template_uri.unwrap()
+    } else {
+        raster_template_uri.to_string()
+    };
+
     // For each content S2 package, read the S2 raster token files
     use futures::future::FutureExt;
     let s2_rasters: Vec<_> = join_all(s2_raster_tokens.iter().map(|token| {
         if raster_template_uri.ends_with(".png") {
             read_content_raster_s2_from_terrarium_rgb_png(
                 resource_loader.clone(),
-                raster_template_uri,
+                &uri,
                 s2_content_package_level,
                 *token,
             )
@@ -406,7 +413,7 @@ pub async fn build_terrarium_rgb_tile(
         } else {
             read_content_raster_s2_from_lerc_zstd_tif(
                 resource_loader.clone(),
-                raster_template_uri,
+                &uri,
                 s2_content_package_level,
                 *token,
             )
@@ -472,6 +479,7 @@ pub fn make_empty_wmts_simple_imagery_tile(index: &MapzenTileIndex) -> Bytes {
 pub async fn build_simple_wmts_imagery_tile(
     resource_loader: resource_io::ResourceLoader,
     raster_template_uri: &str, // Path to rasters, we replace {CONTENT_ROOT_TOKEN}, {FACE}, {LEVEL}, {COL}, {ROW}
+    fallback_raster_template_uri: Option<String>, // Path to rasters, we replace {CONTENT_ROOT_TOKEN}, {FACE}, {LEVEL}, {COL}, {ROW}
     s2_content_package_level: i32,
     index: &MapzenTileIndex,
 ) -> Result<Bytes> {
@@ -490,9 +498,9 @@ pub async fn build_simple_wmts_imagery_tile(
         s2_raster_level
     );
 
-    if s2_raster_level < s2_content_package_level {
+    if s2_raster_level < s2_content_package_level && fallback_raster_template_uri.is_none() {
         // Maybe just make an HAE=0 version and return it?
-        bail!("TODO: Need to pull from coarse raster for this");
+        bail!("Nothing to do: no fallback raster")
     }
 
     // Find S2 coverage at S2 raster level
@@ -506,11 +514,17 @@ pub async fn build_simple_wmts_imagery_tile(
     // FUTURE OPTIMIZATION: Sort S2 raster tokens by S2 content token bins, just
     // to optimize cache locality
 
+    let uri = if s2_raster_level < s2_content_package_level {
+        fallback_raster_template_uri.unwrap()
+    } else {
+        raster_template_uri.to_string()
+    };
+
     // For each content S2 package, read the S2 raster token files
     let s2_rasters: Vec<_> = join_all(s2_raster_tokens.iter().map(|token| {
         read_content_raster_s2_from_jpg(
             resource_loader.clone(),
-            raster_template_uri,
+            &uri,
             s2_content_package_level,
             *token,
         )

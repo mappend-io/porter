@@ -28,6 +28,11 @@ pub fn apply_imagery_warp_from_source(
 
             let ll = LatLng::from_degrees(lat, lon);
             let leaf = CellID::from(&ll);
+
+            if leaf.face() != source.face {
+                continue;
+            }
+
             let leaf_center_st = leaf.bound_st().center();
             let s = leaf_center_st.x;
             let t = leaf_center_st.y;
