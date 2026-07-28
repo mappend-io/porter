@@ -5,9 +5,28 @@ body {
     width: 100%;
     height: 100%;
     overflow: hidden;
+    font-family: system-ui, sans-serif;
 }
 
 #cesiumContainer {
     width: 100vw;
     height: 100vh;
+}
+
+#info {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 1;
+    background: rgba(255, 255, 255, 0.9);
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 13px;
+    line-height: 1.5;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+#info code {
+    background: #eee;
+    padding: 1px 4px;
+    border-radius: 2px;
 }
