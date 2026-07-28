@@ -1,6 +1,7 @@
 import "./style.css";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import S2Grid from "vgrid-maplibre/S2/S2Grid";
 
 const id = window.location.pathname.split("/").filter(Boolean)[1];
 const TILE_URL = `/terrarium/${id}/{z}/{x}/{y}.png`;
@@ -154,6 +155,23 @@ function toggleHillshade() {
     .classList.toggle("active", next === "visible");
 }
 
+var s2Grid = null;
+var gridVisible = false;
+function toggleGrid() {
+  gridVisible = !gridVisible;
+  if (!gridVisible) {
+      s2Grid.remove();
+  } else {
+      s2Grid.show();
+  }
+  if (map.getLayer('s2-labels')) {
+    map.setLayoutProperty('s2-labels', 'visibility', gridVisible ? 'visible' : 'none');
+  }
+  document
+    .getElementById("grid-toggle")
+    .classList.toggle("active", gridVisible);
+}
+
 const controls = document.createElement("div");
 controls.id = "layer-controls";
 controls.innerHTML = `
@@ -166,6 +184,9 @@ controls.innerHTML = `
   <div id="hillshade-control">
     <button id="hillshade-toggle" class="active">Hillshade</button>
   </div>
+  <div id="grid-control">
+    <button id="grid-toggle" class="">S2 grid</button>
+  </div>
 `;
 document.body.appendChild(controls);
 
@@ -175,6 +196,9 @@ document.querySelectorAll("#base-toggle button").forEach((btn) => {
 document
   .getElementById("hillshade-toggle")
   .addEventListener("click", toggleHillshade);
+document
+  .getElementById("grid-toggle")
+  .addEventListener("click", toggleGrid);
 
 map.on("mousemove", (e) => {
   document.getElementById("coords").textContent =
@@ -184,3 +208,39 @@ map.on("zoom", () => {
   document.getElementById("zoom").textContent = map.getZoom().toFixed(2);
 });
 map.on("error", (e) => console.error("map error:", e.error));
+
+map.on('style.load', () => {
+  s2Grid = new S2Grid(map, {
+    color: 'rgba(255, 255, 0, 0.5)',
+    redraw: 'moveend',
+    minResolution: 2,
+    maxResolution: 7,
+  });
+  if (!gridVisible) {
+    s2Grid.remove();
+  }
+});
+
+map.on('sourcedata', (e) => {
+  if (
+    e.sourceId === 's2-grid' &&
+    map.getSource('s2-grid') &&
+    !map.getLayer('s2-labels')
+  ) {
+    map.addLayer({
+      id: 's2-labels',
+      type: 'symbol',
+      source: 's2-grid',
+      layout: {
+        'text-field': ['get', 's2_token'],
+        'text-size': 12,
+        'visibility': gridVisible ? 'visible' : 'none',
+      },
+      paint: {
+        'text-halo-color': 'white',        // halo color
+        'text-halo-width': 1.5,            // halo width
+        'text-halo-blur': 0.5              // optional: smooth halo edges
+      },
+    });
+  }
+});

@@ -1,0 +1,31 @@
+diff --git a/S2/S2Grid.js b/S2/S2Grid.js
+index b3bd722751afbec040eece078e3d67e2814092f7..d0701535cf466222634b030d81099f7d886f2395 100644
+--- a/S2/S2Grid.js
++++ b/S2/S2Grid.js
+@@ -1,5 +1,5 @@
+ //  Reference: https://s2js.org/classes/s2js.s2.Polygon.html
+-import { s1, s2, geojson } from 'https://esm.sh/s2js'
++import { s1, s2, geojson } from 's2js'
+ 
+ class S2Grid {
+   constructor(map, options = {}) {
+@@ -8,6 +8,8 @@ class S2Grid {
+       color: options.color || 'rgba(255, 0, 0, 1)',
+       width: options.width || 1,
+       redraw: options.redraw || 'moveend',
++      minResolution: options.minResolution !== undefined ? options.minResolution : 0,
++      maxResolution: options.maxResolution !== undefined ? options.maxResolution : 0,
+     };
+     this.sourceId = 's2-grid';
+     this.gridLayerId = 's2-grid-layer';
+@@ -101,8 +103,8 @@ class S2Grid {
+ 
+ 
+   getResolution(zoom) {
+-    const min_res = 0;
+-    const max_res = 30;
++    const min_res = this.options.minResolution;
++    const max_res = this.options.maxResolution;
+     const resolution = Math.min(max_res, Math.max(min_res, Math.floor(zoom)));
+     return resolution;
+   }
