@@ -13,6 +13,7 @@ import {
   Cartesian3,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
+  DirectionalLight,
 } from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import "./style.css";
@@ -48,6 +49,15 @@ const viewer = new Viewer("cesiumContainer", {
   baseLayerPicker: false,
   geocoder: false,
   scene3DOnly: true,
+});
+
+viewer.scene.light = new DirectionalLight({
+  direction: viewer.camera.directionWC,
+  intensity: 4.0,
+});
+
+viewer.scene.preRender.addEventListener((scene) => {
+  Cartesian3.clone(scene.camera.directionWC, scene.light.direction);
 });
 
 viewer.cesiumWidget.creditContainer.style.display = "none";
@@ -118,28 +128,35 @@ viewer.camera.moveEnd.addEventListener(() => {
   updateURL();
 });
 
-viewer.camera.changed.addEventListener(() => {
+function updateTimeAndHeight() {
   const cartographic = viewer.camera.positionCartographic;
+  if (!cartographic) return;
+
   const longitudeDeg = CesiumMath.toDegrees(cartographic.longitude);
 
-  // Offset UTC so solar noon aligns with the viewed longitude
+  // Offset UTC so solar noon (12:00 PM) aligns with the viewed longitude
   const solarOffsetHours = longitudeDeg / 15;
-  const now = new Date();
-  now.setUTCHours(now.getUTCHours() + solarOffsetHours);
+  // Pick an equinox date so both northern and southern hemispheres are evenly lit
+  const now = new Date("2023-03-21T12:00:00Z");
+  now.setUTCHours(12 - solarOffsetHours);
 
   viewer.clock.currentTime = JulianDate.fromDate(now);
-  document.getElementById("height").textContent = cartographic.height.toFixed(2);
-});
 
-// Update initial height display
-if (document.getElementById("height") && viewer.camera.positionCartographic) {
-  document.getElementById("height").textContent = viewer.camera.positionCartographic.height.toFixed(2);
+  const heightEl = document.getElementById("height");
+  if (heightEl) {
+    heightEl.textContent = cartographic.height.toFixed(2);
+  }
 }
+
+viewer.camera.changed.addEventListener(updateTimeAndHeight);
+
+// Call once on startup so the sky/globe isn't dark before the first movement
+updateTimeAndHeight();
 
 const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
 handler.setInputAction((movement) => {
   let position;
-  
+
   // Try to pick 3D tiles or terrain first
   if (viewer.scene.pickPositionSupported) {
     try {
