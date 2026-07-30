@@ -46,3 +46,6 @@ metrics = "0.24.6"
 metrics-exporter-prometheus = "0.18.3"
 axum-prometheus = "0.10.0"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
+
+[target.'cfg(target_env = "musl")'.dependencies]
+mimalloc = "0.1.52"

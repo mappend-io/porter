@@ -28,6 +28,10 @@ pub mod s2_utils;
 pub mod tiles3d;
 pub mod utils;
 
+#[cfg(target_env = "musl")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[cfg(feature = "embedded-viewer")]
 pub mod viewer;
 
