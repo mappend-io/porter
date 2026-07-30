@@ -57,9 +57,13 @@ async fn main() -> Result<()> {
         info!("Prometheus metrics listening on {:?}", addr);
         metrics_exporter_prometheus::PrometheusBuilder::new()
             .add_global_label("app", "porter")
-            .set_buckets(&[
-                0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
-            ])?
+            .set_buckets_for_metric(
+                metrics_exporter_prometheus::Matcher::Suffix("duration_seconds".into()),
+                &[
+                    0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
+                    30.0,
+                ],
+            )?
             .with_http_listener(addr)
             .install()
             .expect("failed to install Prometheus recorder");
