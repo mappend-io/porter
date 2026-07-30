@@ -56,6 +56,7 @@ async fn main() -> Result<()> {
     if let Some(addr) = metrics_addr {
         info!("Prometheus metrics listening on {:?}", addr);
         metrics_exporter_prometheus::PrometheusBuilder::new()
+            .add_global_label("app", "porter")
             .with_http_listener(addr)
             .install()
             .expect("failed to install Prometheus recorder");

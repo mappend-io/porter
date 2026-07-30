@@ -64,8 +64,8 @@ impl RangeReader for FileRangeReader {
         })
         .await;
 
-        counter!("file_range_reads_total").increment(1);
-        counter!("file_range_read_bytes_total").increment(actual_length as u64);
+        counter!("porter_file_range_reads_total").increment(1);
+        counter!("porter_file_range_read_bytes_total").increment(actual_length as u64);
 
         // Flatten the Result returned by spawn_blocking
         match result {

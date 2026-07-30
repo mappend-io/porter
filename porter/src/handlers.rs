@@ -326,10 +326,10 @@ pub async fn get_content_payload(
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-        counter!("transform_inline_owt_referenced_models_tiles_total").increment(1);
-        counter!("transform_inline_owt_referenced_models_unique_models_total")
+        counter!("porter_transform_inline_owt_referenced_models_tiles_total").increment(1);
+        counter!("porter_transform_inline_owt_referenced_models_unique_models_total")
             .increment(referenced_models.len() as u64);
-        //counter!("transform_inline_owt_referenced_models_unique_instances_total")
+        //counter!("porter_transform_inline_owt_referenced_models_unique_instances_total")
         //    .increment(features.len() as u64);
     }
 
@@ -341,7 +341,7 @@ pub async fn get_content_payload(
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
 
     // TODO: Add s2_level
-    counter!("content_3dtiles_tiles_total").increment(1);
+    counter!("porter_content_3dtiles_tiles_total").increment(1);
 
     Ok((headers, bytes))
 }
@@ -382,7 +382,7 @@ pub async fn get_base_globe_terrain_payload(
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
 
     // TODO: Would be nice to capture s2 level here
-    counter!("low_res_globe_passthrough_tiles_total").increment(1);
+    counter!("porter_low_res_globe_passthrough_tiles_total").increment(1);
 
     Ok((headers, bytes))
 }
@@ -454,7 +454,7 @@ pub async fn get_terrarium_tile(
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
 
-    counter!("terrarium_tiles_total", "zoom_level" => paths.zoom.to_string()).increment(1);
+    counter!("porter_terrarium_tiles_total", "zoom_level" => paths.zoom.to_string()).increment(1);
 
     Ok((headers, bytes))
 }
@@ -526,7 +526,7 @@ pub async fn get_wmts_simple_imagery(
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
 
-    counter!("wmts_simple_tiles_total", "zoom_level" => paths.zoom.to_string()).increment(1);
+    counter!("porter_wmts_simple_tiles_total", "zoom_level" => paths.zoom.to_string()).increment(1);
 
     Ok((headers, bytes))
 }

@@ -32,18 +32,18 @@ impl CachingRangeReader {
     async fn fetch_block_async(&self, block_index: u64) -> Result<Bytes, Error> {
         let key = (self.cache_namespace, block_index);
         let cache_result = self.cache.get_value_or_guard_async(&key).await;
-        counter!("caching_range_reader_queries").increment(1);
+        counter!("porter_caching_range_reader_queries").increment(1);
 
         // If we already have the result, early out, otherwise take a guard
         let guard = match cache_result {
             Ok(bytes) => {
-                counter!("caching_range_reader_hits").increment(1);
+                counter!("porter_caching_range_reader_hits").increment(1);
                 return Ok(bytes);
             }
             Err(guard) => guard,
         };
 
-        counter!("caching_range_reader_misses").increment(1);
+        counter!("porter_caching_range_reader_misses").increment(1);
 
         let file_size = self.size();
         let fetch_offset = block_index * self.block_size;
@@ -96,7 +96,7 @@ impl RangeReader for CachingRangeReader {
         // it at all. Just read directly. Huge objects pollute the cache, and are
         // generally something read a single time (a huge archive index, maybe).
         if end_block - start_block > 16 {
-            counter!("caching_range_reader_large_reads").increment(1);
+            counter!("porter_caching_range_reader_large_reads").increment(1);
             return self.reader.read_range_async(offset, length).await;
         }
 

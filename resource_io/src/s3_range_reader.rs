@@ -76,8 +76,8 @@ impl RangeReader for S3RangeReader {
             length, offset, self.bucket, self.key
         );
 
-        counter!("s3_range_reads_total").increment(1);
-        counter!("s3_range_read_bytes_total").increment(actual_length);
+        counter!("porter_s3_range_reads_total").increment(1);
+        counter!("porter_s3_range_read_bytes_total").increment(actual_length);
 
         Ok(aggregated_bytes.into_bytes())
     }
