@@ -1,0 +1,37 @@
+name: Build windows binary
+
+on:
+  push:
+    tags: ['v*']
+    branches:
+      - main
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release -p porter
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: porter-windows-exe
+          path: target/release/porter.exe
