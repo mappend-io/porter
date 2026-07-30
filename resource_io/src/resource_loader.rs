@@ -91,7 +91,14 @@ impl ResourceLoader {
                     ));
                 Ok(caching_reader as Arc<dyn RangeReader>)
                 */
-                Ok(Arc::new(FileRangeReader::new(parsed_uri.path_str())?) as Arc<dyn RangeReader>)
+                let path = url::Url::parse(parsed_uri.as_str())
+                    .map_err(|e| Error::BadUri(e.to_string()))?
+                    .to_file_path()
+                    .map_err(|_| {
+                        Error::BadUri(format!("Could not extract file path from uri {uri}"))
+                    })?;
+                Ok(Arc::new(FileRangeReader::new(&path.to_string_lossy())?)
+                    as Arc<dyn RangeReader>)
             }
             "https" | "http" => todo!(),
             "s3" => {
@@ -397,7 +404,12 @@ impl ResourceLoader {
     ) -> Result<Vec<String>, Error> {
         match uri.scheme_str() {
             "file" => {
-                let path = uri.path_str();
+                let path = url::Url::parse(uri.as_str())
+                    .map_err(|e| Error::BadUri(e.to_string()))?
+                    .to_file_path()
+                    .map_err(|_| {
+                        Error::BadUri(format!("Could not extract file path from uri {uri}"))
+                    })?;
                 let mut entries = tokio::fs::read_dir(path).await?;
                 let mut items = vec![];
                 while let Some(entry) = entries.next_entry().await? {
