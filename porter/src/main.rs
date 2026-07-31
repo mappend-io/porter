@@ -109,6 +109,8 @@ async fn main() -> Result<()> {
     let short_cache_routes = Router::new()
         .route("/{id}", get(get_root_tileset))
         .route("/layers", get(get_layers))
+        .route("/features/collections", get(get_features_collections))
+        .route("/features/collections/{id}", get(get_features_collection))
         .route_layer(from_fn(cache_short));
 
     let long_cache_routes = Router::new()
@@ -130,8 +132,16 @@ async fn main() -> Result<()> {
         .route("/wmts/{id}/{zoom}/{x}/{y}", get(get_wmts_simple_imagery))
         .route_layer(from_fn(cache_forever));
 
+    let ogc_features_routes = Router::new()
+        .route("/features", get(get_features_landing))
+        .route("/features/", get(get_features_landing))
+        .route("/features/conformance", get(get_features_conformance))
+        .route("/features/api", get(get_features_api))
+        .route("/features/collections/{id}/items", get(get_features_items));
+
     let app = Router::new()
         .merge(compat_routes)
+        .merge(ogc_features_routes)
         .merge(short_cache_routes)
         .merge(long_cache_routes)
         .layer(prometheus_layer);

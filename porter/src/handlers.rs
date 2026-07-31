@@ -4,7 +4,7 @@ use crate::utils::*;
 use anyhow::{Context, Result};
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::IntoResponse;
-use axum::{Json, extract::Path, extract::State, http::StatusCode};
+use axum::{Json, extract::Path, extract::Query, extract::State, http::StatusCode};
 use geojson::{GeoJson, Geometry, GeometryValue};
 use iri_string::types::{UriAbsoluteStr, UriReferenceStr, UriRelativeStr};
 use metrics::counter;
@@ -12,10 +12,16 @@ use serde::{Deserialize, Serialize};
 use transforms::combine_referenced_models::*;
 
 #[derive(Serialize)]
+pub struct LayerItemEndpoint {
+    r#type: String,
+    uri: String,
+}
+
+#[derive(Serialize)]
 pub struct LayerItem {
     id: String,
     description: String,
-    endpoint: String,
+    endpoints: Vec<LayerItemEndpoint>,
 }
 
 #[derive(Serialize)]
@@ -37,14 +43,50 @@ pub async fn get_layers(
     let mut items: Vec<LayerItem> = layers
         .iter()
         .map(|layer| -> Result<LayerItem, StatusCode> {
-            let uri = UriRelativeStr::new(&layer.id)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-                .resolve_against(base_uri)
-                .to_string();
+            let mut endpoints = vec![];
+
+            endpoints.push(LayerItemEndpoint {
+                r#type: "3d_tiles".to_string(),
+                uri: UriRelativeStr::new(&layer.id)
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+                    .resolve_against(base_uri)
+                    .to_string(),
+            });
+
+            if layer.elevation_raster_content.is_some() {
+                endpoints.push(LayerItemEndpoint {
+                    r#type: "elevation_mapzen_terrarium_rgb_png".to_string(),
+                    uri: UriRelativeStr::new(&format!("terrarium/{}", layer.id,))
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+                        .resolve_against(base_uri)
+                        .to_string(),
+                });
+            }
+
+            if layer.imagery_raster_content.is_some() {
+                endpoints.push(LayerItemEndpoint {
+                    r#type: "imagery_wmts_simple_jpg".to_string(),
+                    uri: UriRelativeStr::new(&format!("wmts/{}", layer.id,))
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+                        .resolve_against(base_uri)
+                        .to_string(),
+                });
+            }
+
+            if layer.source_s2_content_extension == "geojson" {
+                endpoints.push(LayerItemEndpoint {
+                    r#type: "ogc_api_features".to_string(),
+                    uri: UriRelativeStr::new(&format!("features/collections/{}/items", layer.id,))
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+                        .resolve_against(base_uri)
+                        .to_string(),
+                });
+            }
+
             Ok(LayerItem {
                 id: layer.id.clone(),
                 description: layer.description.clone().unwrap_or("".to_string()),
-                endpoint: uri,
+                endpoints,
             })
         })
         .collect::<Result<Vec<LayerItem>, StatusCode>>()?;
@@ -527,6 +569,281 @@ pub async fn get_wmts_simple_imagery(
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
 
     counter!("porter_wmts_simple_tiles_total", "zoom_level" => paths.zoom.to_string()).increment(1);
+
+    Ok((headers, bytes))
+}
+
+pub async fn get_features_api() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "openapi": "3.0.0",
+        "info": {
+            "title": "Porter Feature API",
+            "version": "1.0.0"
+        },
+        "paths": {
+            "/features": {
+                "get": {
+                    "responses": {
+                        "200": { "description": "Landing page" }
+                    }
+                }
+            },
+            "/features/collections": {
+                "get": {
+                    "responses": {
+                        "200": { "description": "Collections" }
+                    }
+                }
+            }
+        }
+    }))
+}
+
+pub async fn get_features_landing(State(app_state): State<AppState>) -> Json<serde_json::Value> {
+    let base = format!("{}/features", app_state.config.base_url);
+    Json(serde_json::json!({
+        "title": "Porter Feature API",
+        "description": "OGC API - Features",
+        "links": [
+            { "rel": "self",         "type": "application/json",     "title": "This document",        "href": format!("{base}") },
+            { "rel": "conformance",  "type": "application/json",     "title": "Conformance",          "href": format!("{base}/conformance") },
+            { "rel": "data",         "type": "application/json",     "title": "Collections",          "href": format!("{base}/collections") },
+            { "rel": "service-desc", "type": "application/vnd.oai.openapi+json;version=3.0", "title": "API Definition", "href": format!("{base}/api") },
+        ]
+    }))
+}
+
+pub async fn get_features_conformance() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "conformsTo": [
+            "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/core",
+            "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/oas30",
+            "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/geojson"
+        ]
+    }))
+}
+
+fn collection_doc(base: &str, id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "title": id,
+        "extent": {
+            "spatial": {
+                // TODO: Being a bit lazy here, we could calculate a rough coverage from the given s2 coverage tokens in the layer
+                "bbox": [[-180.0, -90.0, 180.0, 90.0]],
+                "crs": "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
+            }
+        },
+        "crs": [ "http://www.opengis.net/def/crs/OGC/1.3/CRS84" ],
+        "itemType": "feature",
+        "links": [
+            {
+                "rel": "items",
+                "type": "application/geo+json",
+                "title": format!("{id} features"),
+                "href": format!("{base}/collections/{id}/items")
+            },
+            {
+                "rel": "self",
+                "type": "application/json",
+                "href": format!("{base}/collections/{id}")
+            }
+        ]
+    })
+}
+
+pub async fn get_features_collections(
+    State(app_state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let layers = app_state
+        .get_layer_definitions()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // TODO: Check on trailing slashes/mashing, use proper join
+    let base = format!("{}/features", app_state.config.base_url);
+
+    let collections: Vec<_> = layers
+        .iter()
+        .filter(|layer| layer.source_s2_content_extension == "geojson")
+        .map(|layer| collection_doc(&base, &layer.id))
+        .collect();
+
+    Ok(Json(serde_json::json!({
+        "links": [
+            { "rel": "self", "type": "application/json", "href": format!("{base}/collections") }
+        ],
+        "collections": collections
+    })))
+}
+
+pub async fn get_features_collection(
+    State(app_state): State<AppState>,
+    Path(id): Path<String>,
+) -> Json<serde_json::Value> {
+    // TODO: Check on trailing slashes/mashing, use proper join
+    let base = format!("{}/features", app_state.config.base_url);
+    Json(collection_doc(&base, &id))
+}
+
+#[derive(Deserialize)]
+pub struct GetFeaturesPaths {
+    pub id: String,
+}
+
+#[derive(Deserialize)]
+pub struct GetFeaturesBboxParams {
+    // minx,miny,maxx,maxy
+    pub bbox: Option<String>,
+
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+pub async fn get_features_items(
+    State(app_state): State<AppState>,
+    Query(params): Query<GetFeaturesBboxParams>,
+    Path(paths): Path<GetFeaturesPaths>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let layer_def = app_state
+        .get_layer_definition(&paths.id)
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    // TODO: check for the maxar vector extension, so we can skip over the transformed inline layers
+    if layer_def.source_s2_content_extension != "geojson" {
+        return Err(StatusCode::NOT_FOUND);
+    }
+
+    let gd_coverage = if let Some(bbox_str) = &params.bbox {
+        let coords = bbox_str
+            .split(',')
+            .map(|s| s.parse::<f64>())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+        let [minx, miny, maxx, maxy] = coords.as_slice() else {
+            return Err(StatusCode::BAD_REQUEST);
+        };
+
+        terrarium::Wgs84Rect2d {
+            south_west: terrarium::Wgs84Coord2d {
+                lon: *minx,
+                lat: *miny,
+            },
+            north_east: terrarium::Wgs84Coord2d {
+                lon: *maxx,
+                lat: *maxy,
+            },
+        }
+    } else {
+        // A dummy bounding box just to poke the system, QGIS sends out a probe of a single
+        // feature. We don't really have a way to paginate features, or find by id, or find
+        // the first. So.. do this for now. What would be a better way to do do this?
+        terrarium::Wgs84Rect2d {
+            south_west: terrarium::Wgs84Coord2d {
+                lon: 126.5,
+                lat: 35.3,
+            },
+            north_east: terrarium::Wgs84Coord2d {
+                lon: 126.6,
+                lat: 35.4,
+            },
+        }
+    };
+
+    // What s2 tiles does the bbox intersect at the layer_def's content level?
+    let s2_content_tokens =
+        terrarium::gd_rect_to_s2_coverage(&gd_coverage, layer_def.source_s2_content_max_level);
+    tracing::trace!(
+        "Found these s2 tokens for features request: {:?}",
+        s2_content_tokens
+    );
+
+    let resource_loader = app_state.resource_loader.clone();
+
+    // For each content S2 tile, extract the vectors and only take those that intersect the box
+    let mut features: Vec<geojson::Feature> =
+        futures::future::join_all(s2_content_tokens.iter().map(|token| {
+            let resource_loader = resource_loader.clone();
+
+            let parent = token.parent(layer_def.source_s2_content_package_level as u64);
+            let source_archive = layer_def.resolve_content_uri_template(&parent.to_token());
+
+            async move {
+                let (face, level, col, row) =
+                    crate::s2_utils::face_level_col_row_from_cell_id(*token);
+                let uri_str = format!(
+                    "{}/{}/{}/{}/{}.geojson",
+                    source_archive, face, level, col, row
+                );
+
+                let uri = iri_string::types::UriAbsoluteStr::new(&uri_str)
+                    .map_err(|_| anyhow::anyhow!("Invalid URI: {}", uri_str))?;
+
+                // Read the geojson from the storage backend
+                let bytes = match resource_loader.read_async(uri).await {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::trace!(
+                            "Failed to read geojson from {} (likely empty tile): {:?}",
+                            uri,
+                            e
+                        );
+                        return Err(anyhow::anyhow!("Read error"));
+                    }
+                };
+
+                // Parse geojson
+                let geojson_str = std::str::from_utf8(&bytes)?;
+                let parsed = match geojson_str.parse::<geojson::GeoJson>() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        tracing::error!("Failed to parse geojson from {}: {:?}", uri, e);
+                        return Err(anyhow::anyhow!("Parse error"));
+                    }
+                };
+
+                let features = match parsed {
+                    geojson::GeoJson::FeatureCollection(fc) => fc.features,
+                    geojson::GeoJson::Feature(f) => vec![f],
+                    _ => vec![],
+                };
+
+                // TODO: Filter against the actual bbox, this is loose
+
+                Ok::<_, anyhow::Error>(features)
+            }
+        }))
+        .await
+        .into_iter()
+        // It's ok that these fail sometimes, we might not have entire world coverage of input data
+        .filter_map(|r| r.ok())
+        .flatten()
+        .collect();
+
+    // Respect the limit parameter if QGIS asked for a small probe (e.g. limit=10)
+    if let Some(limit) = params.limit {
+        features.truncate(limit);
+    }
+
+    counter!("porter_features_total").increment(features.len() as u64);
+    counter!("porter_queries_total").increment(1);
+    tracing::debug!("OGC API - Features call returned {} items", features.len());
+
+    // We have features, but want a geojson file
+    let fc = geojson::FeatureCollection {
+        bbox: None,
+        features,
+        foreign_members: None,
+    };
+
+    let combined_geojson = geojson::GeoJson::FeatureCollection(fc);
+    let bytes = bytes::Bytes::from(combined_geojson.to_string());
+
+    let content_type = sniff_content_type(&bytes);
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
 
     Ok((headers, bytes))
 }
