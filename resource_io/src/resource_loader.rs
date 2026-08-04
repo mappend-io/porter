@@ -122,6 +122,32 @@ impl ResourceLoader {
         Ok(reader)
     }
 
+    // Sometimes we need to bypass the cache for guaranteed freshness
+    async fn build_uncached_reader(&self, uri: &str) -> Result<Arc<dyn RangeReader>, Error> {
+        let parsed_uri = UriAbsoluteStr::new(uri)?;
+        match parsed_uri.scheme_str() {
+            "file" => {
+                let path = url::Url::parse(parsed_uri.as_str())
+                    .map_err(|e| Error::BadUri(e.to_string()))?
+                    .to_file_path()
+                    .map_err(|_| {
+                        Error::BadUri(format!("Could not extract file path from uri {uri}"))
+                    })?;
+                Ok(Arc::new(FileRangeReader::new(&path.to_string_lossy())?)
+                    as Arc<dyn RangeReader>)
+            }
+            "https" | "http" => todo!(),
+            "s3" => {
+                let bucket = parsed_uri.authority_str().unwrap().to_string();
+                let path = parsed_uri.path_str().trim_start_matches('/').to_string();
+                let s3_reader =
+                    Arc::new(S3RangeReader::new(self.s3_client.clone(), bucket, path).await?);
+                Ok(s3_reader as Arc<dyn RangeReader>)
+            }
+            _ => Err(Error::BadUri("Unsupported uri scheme".to_string())),
+        }
+    }
+
     async fn get_archive_index_async(
         &self,
         archive_uri: &str,
@@ -283,6 +309,26 @@ impl ResourceLoader {
             let bytes = reader.read_range_async(0, reader.size()).await?;
             Ok(bytes)
         }
+    }
+
+    // Bypasses reader and block caches for a fresh result
+    pub async fn read_async_uncached(&self, uri: &UriAbsoluteStr) -> Result<Bytes, Error> {
+        if !uri.is_normalized() {
+            return Err(Error::BadUri("uri is not normalized".to_string()));
+        }
+
+        if uri.scheme_str() == "file" && !uri.path_str().starts_with('/') {
+            return Err(Error::BadUri("File uri must be absolute".to_string()));
+        }
+
+        if Self::split_archive_parts(uri.as_str()).is_some() {
+            return Err(Error::BadUri(
+                "read_async_uncached does not support archive-embedded uris".to_string(),
+            ));
+        }
+
+        let reader = self.build_uncached_reader(uri.as_str()).await?;
+        reader.read_range_async(0, reader.size()).await
     }
 
     async fn compute_offset_for_uri(&self, uri: &UriAbsoluteStr) -> Option<u64> {

@@ -34,7 +34,9 @@ impl AppState {
                 let relative = UriReferenceStr::new(&file_name)?;
                 let resolved = relative.resolve_against(root).to_string();
                 let absolute = UriAbsoluteStr::new(&resolved)?;
-                let bytes = resource_loader.read_async(absolute).await?;
+                // Bypass the size-bound cache, read directly here. We don't do
+                // it more often than layer definition ttl.
+                let bytes = resource_loader.read_async_uncached(absolute).await?;
                 let mut def = serde_json::from_slice::<LayerDefinition>(&bytes)?;
                 def.id = id_owned;
                 Ok::<_, anyhow::Error>(Arc::new(def))
