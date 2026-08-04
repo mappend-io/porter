@@ -827,8 +827,8 @@ pub async fn get_features_items(
         features.truncate(limit);
     }
 
-    counter!("porter_features_total").increment(features.len() as u64);
-    counter!("porter_queries_total").increment(1);
+    counter!("porter_features_items_features_total").increment(features.len() as u64);
+    counter!("porter_features_items_queries_total").increment(1);
     tracing::debug!("OGC API - Features call returned {} items", features.len());
 
     // We have features, but want a geojson file
