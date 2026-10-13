@@ -9,26 +9,26 @@ Porter needs at least one [layer definition](/guide/layer-definitions) to be use
 ### Run Porter
 
 ```bash
-porter --layer-config-uri file:///some/path/to/layers/
+porter --base-url http://localhost:3200 --layer-config-uri file:///some/path/to/layers/
 ```
 
 ### Use one of Porter's built-in previewers to inspect the layer
 
-- Use the bundled CesiumJS viewer: http://localhost:3200/?layer=my-layer 
+- Use the bundled CesiumJS viewer: http://localhost:3200/?layers=my-layer
 - Or MapLibreGL JS: http://localhost:3200/terrarium_viewer/my-layer
 
 ### Use a 3D Tiles compatible tool to access the data
 
 Point your own CesiumJS, Cesium Native or other 3D Tiles tooling to http://localhost:3200/my-layer.
 
-### Programatically discover available layers
+### Programmatically discover available layers
 
 Use `http://localhost:3200/layers` to discover all known layers and endpoints
 
 ## Command line reference
 
 ```text
-Usage: porter [OPTIONS] --layer-config-uri <LAYER_CONFIG_URI>
+Usage: porter [OPTIONS] --base-url <BASE_URL> --layer-config-uri <LAYER_CONFIG_URI>
 
 Options:
       --log-level <LOG_LEVEL>
@@ -40,15 +40,15 @@ Options:
       --base-url <BASE_URL>
           Public base url [env: BASE_URL=]
       --cors-origin <CORS_ORIGIN>
-          Allow CORS from a specific origin, or "*" for any [env: CORS_ORIGIN=*]
+          Allow CORS from a specific origin, or "*" for any [env: CORS_ORIGIN=]
       --metrics-listen-addr <METRICS_LISTEN_ADDR>
           Prometheus metrics listen address [env: METRICS_LISTEN_ADDR=]
       --layer-config-uri <LAYER_CONFIG_URI>
           Location of layer configuration JSON documents [env: LAYER_CONFIG_URI=]
       --layer-definition-ttl <LAYER_DEFINITION_TTL>
-          [env: LAYER_DEFINITION_TTL=] [default: 5m]
+          How long should layer definitions stay in the cache? [env: LAYER_DEFINITION_TTL=] [default: 5m]
       --block-cache-size <BLOCK_CACHE_SIZE>
-          [env: BLOCK_CACHE_SIZE=] [default: 2GiB]
+          Bound resource loader block cache [env: BLOCK_CACHE_SIZE=] [default: 2GiB]
       --tls-cert <TLS_CERT>
           TLS certificate file path [env: TLS_CERT=]
       --tls-key <TLS_KEY>

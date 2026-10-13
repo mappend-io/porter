@@ -9,7 +9,7 @@ locate source content. To accomplish this, several key elements are necessary:
 
 - `sourceUriContentTemplate`: An `s3:` or `file:` URI pointing to backing source
   data. This is a templated string, the `{CONTENT_ROOT_TOKEN}` is replaced by
-  the S2 token at the `sourceS2ContentLevel`.
+  the S2 token at the `sourceS2ContentPackageLevel`.
   - See [URI notes](/guide/usage#uri-notes) for more details
 - `sourceS2ContentPackageLevel`: All tiled source data must exist at this
   uniform S2 level
@@ -36,7 +36,7 @@ locate source content. To accomplish this, several key elements are necessary:
   endpoint will be exposed. The tokens `{FACE}`, `{LEVEL}`, `{COL}` and `{ROW}`
   will be substituted. Example: `dtm/{FACE}/{LEVEL}/{COL}/{ROW}.tif`.
 - `imageryRasterContent`: Path to JPG rasters within the content, if present. If
-  defined, a WMTS Simple endpoint. The tokens `{FACE}`, `{LEVEL}`, `{COL}` and
+  defined, a WMTS Simple endpoint will be exposed. The tokens `{FACE}`, `{LEVEL}`, `{COL}` and
   `{ROW}` will be substituted. Example:
   `imagery/{FACE}/{LEVEL}/{COL}/{ROW}.jpg`.
 
@@ -102,10 +102,10 @@ my-other-layer.json
 
 ## Changing layer definitions
 
-Layer definitions are loaded on-demand. They are cached in memory by Porter
-for `--layer-definition-ttl` (5m by default). Changing an existing layer
-definition means the change will not necessarily get picked up right away if it
-has recently be used. This helps reduce the load on the config storage layer and
+Layer definitions are loaded on-demand. They are cached in memory by Porter for
+`--layer-definition-ttl` (5m by default). Changing an existing layer definition
+means the change will not necessarily get picked up right away if it has
+recently been used. This helps reduce the load on the config storage layer and
 improve response times.
 
 If a layer has never been accessed, or is a new layer entirely, it will be

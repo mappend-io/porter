@@ -8,6 +8,6 @@ GET /wmts/{layer_id}/{z}/{x}/{y}.jpg
 
 ## Response
 
-`200 OK` · `application/octet-stream`
+`200 OK` · `image/jpeg`
 
 The response body is a JPEG-encoded image.

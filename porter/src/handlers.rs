@@ -564,7 +564,7 @@ pub async fn get_wmts_simple_imagery(
     // TODO: We should probably backfill here instead
     .unwrap_or_else(|_| terrarium::make_empty_wmts_simple_imagery_tile(&index));
 
-    let content_type = "image/jpg";
+    let content_type = "image/jpeg";
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
 
