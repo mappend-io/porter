@@ -20,6 +20,13 @@ Most use QuickCache, which evicts with a CLOCK-PRO-style policy.
   block size is tuned for AWS S3 and gives useful read-ahead, which cuts down
   the number of requests to S3. Reads larger than ~17MiB bypass the block cache
   to avoid polluting it. Local files are not block cached.
+- **Archive entry cache** (QuickCache, `ENTRY_CACHE_SIZE`, default `1GiB`).
+  Content transforms that read many small entries at once, such as inlining
+  referenced models, bypass the block cache. A tile's models are scattered
+  throughout their archive, so whole blocks would mostly hold unrelated
+  entries. Instead each entry is read as an exact byte range (from its offset
+  in the archive index to the next entry's), with entries close together
+  sharing a request, and the still-compressed entries are cached here.
 - **Layer definitions** (moka, up to 1024 entries, TTL `LAYER_DEFINITION_TTL`,
   default `5m`). Layer definitions are always read fresh from the source,
   skipping the reader and block caches, so an updated definition takes effect

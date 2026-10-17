@@ -138,4 +138,8 @@ impl RangeReader for CachingRangeReader {
     fn size(&self) -> u64 {
         self.reader.size()
     }
+
+    async fn read_range_direct_async(&self, offset: u64, length: u64) -> Result<Bytes, Error> {
+        self.reader.read_range_async(offset, length).await
+    }
 }

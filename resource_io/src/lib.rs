@@ -1,8 +1,10 @@
+use archive_entry::ArchiveEntry;
 use archive_index::ArchiveIndex;
 use bytes::Bytes;
 use quick_cache::Weighter;
 use std::sync::Arc;
 
+pub mod archive_entry;
 pub mod archive_index;
 pub mod caching_range_reader;
 pub mod error;
@@ -28,6 +30,16 @@ pub struct ArchiveIndexWeighter;
 
 impl Weighter<String, Arc<ArchiveIndex>> for ArchiveIndexWeighter {
     fn weight(&self, _key: &String, value: &Arc<ArchiveIndex>) -> u64 {
-        (value.entries.len() * 24) as u64
+        value.heap_size() as u64
+    }
+}
+
+#[derive(Clone)]
+pub struct ArchiveEntryWeighter;
+
+impl Weighter<([u8; 16], u64), ArchiveEntry> for ArchiveEntryWeighter {
+    fn weight(&self, _key: &([u8; 16], u64), value: &ArchiveEntry) -> u64 {
+        // Include a rough per-entry overhead so tiny entries aren't free
+        value.data.len() as u64 + 64
     }
 }

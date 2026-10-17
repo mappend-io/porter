@@ -83,6 +83,7 @@ async fn main() -> Result<()> {
 
     let resource_loader_config = ResourceLoaderConfig {
         block_cache_bytes: config.block_cache_size.as_u64(),
+        entry_cache_bytes: config.entry_cache_size.as_u64(),
         ..Default::default()
     };
 

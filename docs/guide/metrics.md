@@ -87,3 +87,18 @@ show up here. Each lookup is for one 1MiB block:
 
 Hit rate is `hits / queries`. A low hit rate under steady traffic suggests
 increasing `BLOCK_CACHE_SIZE`.
+
+### Archive entry cache
+
+Referenced models are read as exact byte ranges of their archive entries rather
+than through the block cache, and the compressed entries are cached. Each lookup
+is for one entry:
+
+- `porter_archive_entry_cache_queries`: Entry lookups
+- `porter_archive_entry_cache_hits`: Lookups served from the cache
+- `porter_archive_entry_cache_misses`: Lookups that needed a read
+- `porter_archive_entry_range_reads_total`: Range reads issued for missed
+  entries. Entries close together in the archive share a read, so this is
+  usually lower than misses.
+
+A low hit rate under steady traffic suggests increasing `ENTRY_CACHE_SIZE`.

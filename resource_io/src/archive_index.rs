@@ -11,6 +11,10 @@ pub struct IndexEntry {
 
 pub struct ArchiveIndex {
     pub entries: Vec<IndexEntry>,
+    // Entry offsets in ascending order, to find where each entry ends
+    sorted_offsets: Vec<u64>,
+    // Where the last entry ends: the local header of the index file itself, if known
+    entries_end: Option<u64>,
 }
 
 impl ArchiveIndex {
@@ -34,13 +38,35 @@ impl ArchiveIndex {
 
     pub fn from_unsorted_entries(mut entries: Vec<IndexEntry>) -> Self {
         entries.sort_unstable_by(|a, b| Self::md5_compare(&a.path_md5, &b.path_md5));
-        Self { entries }
+        Self::from_sorted_entries(entries, None)
     }
 
     pub fn from_raw_bytes(raw_bytes: &[u8]) -> Self {
+        Self::from_sorted_entries(bytemuck::allocation::pod_collect_to_vec(raw_bytes), None)
+    }
+
+    fn from_sorted_entries(entries: Vec<IndexEntry>, entries_end: Option<u64>) -> Self {
+        let mut sorted_offsets: Vec<u64> = entries.iter().map(|e| e.offset).collect();
+        sorted_offsets.sort_unstable();
         Self {
-            entries: bytemuck::allocation::pod_collect_to_vec(raw_bytes),
+            entries,
+            sorted_offsets,
+            entries_end,
         }
+    }
+
+    /// Upper bound of the entry whose local header starts at `offset`: the start
+    /// of the next entry in the archive. Covers the entry's local header, name,
+    /// extra field and data.
+    pub fn entry_end(&self, offset: u64) -> Option<u64> {
+        let next = self.sorted_offsets.partition_point(|&o| o <= offset);
+        self.sorted_offsets.get(next).copied().or(self.entries_end)
+    }
+
+    /// Approximate heap size, for cache weighing
+    pub fn heap_size(&self) -> usize {
+        self.entries.len() * std::mem::size_of::<IndexEntry>()
+            + self.sorted_offsets.len() * std::mem::size_of::<u64>()
     }
 
     // NOTE: This isn't handling md5 collisions. To do that properly would mean
@@ -197,13 +223,48 @@ impl ArchiveIndex {
         let data_start = local_header_offset + 30 + lfh_n + lfh_m;
         let raw_bytes = reader.read_range_async(data_start, data_size).await?;
 
-        tokio::task::spawn_blocking(move || Ok(ArchiveIndex::from_raw_bytes(&raw_bytes)))
-            .await
-            .map_err(|e| {
-                Error::Io(std::io::Error::other(format!(
-                    "spawn_blocking failed: {}",
-                    e
-                )))
-            })?
+        tokio::task::spawn_blocking(move || {
+            Ok(ArchiveIndex::from_sorted_entries(
+                bytemuck::allocation::pod_collect_to_vec(&raw_bytes),
+                Some(local_header_offset),
+            ))
+        })
+        .await
+        .map_err(|e| {
+            Error::Io(std::io::Error::other(format!(
+                "spawn_blocking failed: {}",
+                e
+            )))
+        })?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn entry_end_is_next_entry_offset() {
+        let entry = |path: &str, offset| IndexEntry {
+            path_md5: ArchiveIndex::hash_path(path),
+            offset,
+        };
+        let index = ArchiveIndex::from_sorted_entries(
+            ArchiveIndex::from_unsorted_entries(vec![
+                entry("c", 500),
+                entry("a", 0),
+                entry("b", 120),
+            ])
+            .entries,
+            Some(900),
+        );
+        assert_eq!(index.entry_end(0), Some(120));
+        assert_eq!(index.entry_end(120), Some(500));
+        // The last entry ends where the index file begins
+        assert_eq!(index.entry_end(500), Some(900));
+        assert_eq!(index.find_offset(&ArchiveIndex::hash_path("b")), Some(120));
+
+        let unbounded = ArchiveIndex::from_unsorted_entries(vec![entry("a", 0)]);
+        assert_eq!(unbounded.entry_end(0), None);
     }
 }

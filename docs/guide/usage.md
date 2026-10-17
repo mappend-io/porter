@@ -49,6 +49,8 @@ Options:
           How long should layer definitions stay in the cache? [env: LAYER_DEFINITION_TTL=] [default: 5m]
       --block-cache-size <BLOCK_CACHE_SIZE>
           Bound resource loader block cache [env: BLOCK_CACHE_SIZE=] [default: 2GiB]
+      --entry-cache-size <ENTRY_CACHE_SIZE>
+          Bound resource loader cache of compressed archive entries, used when reading many small entries at once, e.g. referenced models [env: ENTRY_CACHE_SIZE=] [default: 1GiB]
       --tls-cert <TLS_CERT>
           TLS certificate file path [env: TLS_CERT=]
       --tls-key <TLS_KEY>

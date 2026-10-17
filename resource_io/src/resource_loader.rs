@@ -1,22 +1,38 @@
+use super::archive_entry::ArchiveEntry;
 use super::archive_index::ArchiveIndex;
 use super::error::Error;
 use super::file_range_reader::FileRangeReader;
 use super::range_reader::RangeReader;
-use super::{ArchiveIndexWeighter, BytesWeighter};
+use super::{ArchiveEntryWeighter, ArchiveIndexWeighter, BytesWeighter};
 use crate::s3_range_reader::S3RangeReader;
 use bytes::Bytes;
 use iri_string::types::{UriAbsoluteStr, UriAbsoluteString};
+use metrics::counter;
 use quick_cache::sync::Cache;
 use regex::Regex;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
+// read_many: entries closer together than this are fetched in one request. Small
+// gaps cost less than another request.
+const COALESCE_GAP_BYTES: u64 = 64 * 1_024;
+// read_many: cap coalesced requests so a tile's reads stay spread over many requests
+const MAX_COALESCED_RANGE_BYTES: u64 = 8 * 1_024 * 1_024;
+// read_many: concurrent range requests per archive
+const RANGE_READ_CONCURRENCY: usize = 64;
+// read_many: concurrency for reads that go through read_async
+const READ_MANY_FALLBACK_CONCURRENCY: usize = 16;
+// Below this many entries per task, the cost of another blocking task outweighs
+// spreading decompression over more threads
+const MIN_ENTRIES_PER_DECOMPRESS_TASK: usize = 16;
+
 #[derive(Clone)]
 pub struct ResourceLoader {
     readers: Arc<Cache<String, Arc<dyn RangeReader>>>,
     archive_index_cache: Arc<Cache<String, Arc<ArchiveIndex>, ArchiveIndexWeighter>>,
     block_cache: Arc<Cache<([u8; 16], u64), Bytes, BytesWeighter>>, // shared across all block readers to help bound memory
+    entry_cache: Arc<Cache<([u8; 16], u64), ArchiveEntry, ArchiveEntryWeighter>>, // compressed archive entries read by read_many
     s3_client: aws_sdk_s3::Client,
 }
 
@@ -25,6 +41,7 @@ pub struct ResourceLoaderConfig {
     pub max_readers: u64,
     pub archive_index_cache_bytes: u64,
     pub block_cache_bytes: u64,
+    pub entry_cache_bytes: u64,
 }
 
 impl Default for ResourceLoaderConfig {
@@ -33,6 +50,7 @@ impl Default for ResourceLoaderConfig {
             max_readers: 8 * 1_024,
             archive_index_cache_bytes: 2 * 1_024 * 1_024 * 1_024, // 2GiB
             block_cache_bytes: 2 * 1_024 * 1_024 * 1_024,         // 2GiB
+            entry_cache_bytes: 1_024 * 1_024 * 1_024,             // 1GiB
         }
     }
 }
@@ -57,6 +75,14 @@ impl ResourceLoader {
             BytesWeighter,
         );
 
+        // Referenced models are typically ~5-20KiB compressed
+        let entry_cache_estimated_items = config.entry_cache_bytes / (16 * 1_024);
+        let entry_cache = Cache::with_weighter(
+            entry_cache_estimated_items as usize,
+            config.entry_cache_bytes,
+            ArchiveEntryWeighter,
+        );
+
         let s3_config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
         let s3_client = aws_sdk_s3::Client::new(&s3_config);
 
@@ -64,8 +90,23 @@ impl ResourceLoader {
             readers: Arc::new(Cache::new(config.max_readers as usize)),
             archive_index_cache: Arc::new(archive_index_cache),
             block_cache: Arc::new(block_cache),
+            entry_cache: Arc::new(entry_cache),
             s3_client,
         }
+    }
+
+    fn validate_uri(uri: &UriAbsoluteStr) -> Result<(), Error> {
+        // Normalize it yourself outside
+        if !uri.is_normalized() {
+            return Err(Error::BadUri("uri is not normalized".to_string()));
+        }
+
+        // We don't allow relative file URIs that depend on cwd, or should we?
+        if uri.scheme_str() == "file" && !uri.path_str().starts_with('/') {
+            return Err(Error::BadUri("File uri must be absolute".to_string()));
+        }
+
+        Ok(())
     }
 
     async fn get_reader_async(&self, uri: &str) -> Result<Arc<dyn RangeReader>, Error> {
@@ -171,15 +212,7 @@ impl ResourceLoader {
 
     // TODO: Probably keep some other context for a user of this to know if they are in a zip/.3tz/allowing .3tz
     pub async fn read_async(&self, uri: &UriAbsoluteStr) -> Result<Bytes, Error> {
-        // Normalize it yourself outside
-        if !uri.is_normalized() {
-            return Err(Error::BadUri("uri is not normalized".to_string()));
-        }
-
-        // We don't allow relative file URIs that depend on cwd, or should we?
-        if uri.scheme_str() == "file" && !uri.path_str().starts_with('/') {
-            return Err(Error::BadUri("File uri must be absolute".to_string()));
-        }
+        Self::validate_uri(uri)?;
 
         if let Some((archive_path, content_path)) = Self::split_archive_parts(uri.as_str()) {
             let reader = self.get_reader_async(&archive_path).await?;
@@ -331,93 +364,171 @@ impl ResourceLoader {
         reader.read_range_async(0, reader.size()).await
     }
 
-    async fn compute_offset_for_uri(&self, uri: &UriAbsoluteStr) -> Option<u64> {
-        let (archive_path, content_path) = Self::split_archive_parts(uri.as_str())?;
-        let reader = self.get_reader_async(&archive_path).await.ok()?;
-        let index = self
-            .get_archive_index_async(&archive_path, reader)
-            .await
-            .ok()?;
-        let path_md5 = ArchiveIndex::hash_path(&content_path);
-
-        let base_idx = index
-            .entries
-            .binary_search_by(|e| ArchiveIndex::md5_compare(&e.path_md5, &path_md5))
-            .ok()?;
-
-        Some(index.entries[base_idx].offset)
-    }
-
-    // TODO: Mostly useful if reading from an archive, we can lookup the paths and sort them by their order
-    // in the file to maximize cache hits for blocks/reuse.
+    /// Read many URIs at once.
+    ///
+    /// Entries inside archives are fetched with exact ranges (an entry ends where
+    /// the next one in the archive starts) instead of through the block cache,
+    /// coalescing entries that sit close together into one request, and the
+    /// compressed entries are cached. Referenced models are small and scattered
+    /// throughout their archive, so whole blocks mostly fetch unrelated entries:
+    /// 8-10x more bytes than needed for a typical building tile.
     pub async fn read_many(
         &self,
         uris: &[&UriAbsoluteStr],
     ) -> HashMap<UriAbsoluteString, Result<Bytes, Error>> {
-        // Will need to reorder the results back to match the uris in the requested order.
-
-        // TODO: Next step: group uris by archive uri, offset in archive.
-        // If uris aren't in archive, fine, can go into a catch-all group.
-        // Then work through them in that order.
-        //println!("OPTIMIZE THE ORDERING");
-
+        use futures::stream::{self, StreamExt};
         use std::collections::BTreeMap;
 
-        // Group: archive_path → Vec<(uri, offset_within_archive)>
-        let mut by_archive: BTreeMap<String, Vec<(UriAbsoluteString, u64)>> = BTreeMap::new();
+        let mut results = HashMap::with_capacity(uris.len());
 
+        // Anything that can't be resolved with a ranged read takes the regular path
+        let mut fallback: Vec<UriAbsoluteString> = vec![];
+
+        // Group: archive_path → Vec<(uri, path within archive)>
+        let mut by_archive: BTreeMap<String, Vec<(UriAbsoluteString, String)>> = BTreeMap::new();
         for uri in uris {
             let owned = UriAbsoluteStr::to_owned(*uri);
-            if let Some((archive_path, _)) = Self::split_archive_parts(uri.as_str()) {
-                let offset = self.compute_offset_for_uri(uri).await.unwrap_or(u64::MAX);
-                by_archive
+            if let Err(e) = Self::validate_uri(uri) {
+                results.insert(owned, Err(e));
+                continue;
+            }
+            match Self::split_archive_parts(uri.as_str()) {
+                Some((archive_path, content_path)) => by_archive
                     .entry(archive_path)
                     .or_default()
-                    .push((owned, offset));
-            } else {
-                // Non-archive URI — handle separately, no sorting needed
-                by_archive
-                    .entry(String::new())
-                    .or_default()
-                    .push((owned, 0));
+                    .push((owned, content_path)),
+                None => fallback.push(owned),
             }
         }
 
-        // Sort within each archive by offset, then flatten
-        let ordered: Vec<UriAbsoluteString> = by_archive
-            .into_values()
-            .flat_map(|mut group| {
-                group.sort_by_key(|(_, offset)| *offset);
-                group.into_iter().map(|(uri, _)| uri)
-            })
-            .collect();
+        let mut entries = vec![];
+        for (archive_path, members) in by_archive {
+            match self
+                .read_archive_entries(&archive_path, members.clone())
+                .await
+            {
+                Ok((found, missed)) => {
+                    entries.extend(found);
+                    fallback.extend(missed);
+                }
+                // Let the regular path report a per-uri error
+                Err(_) => fallback.extend(members.into_iter().map(|(uri, _)| uri)),
+            }
+        }
 
-        use futures::stream::{self, StreamExt};
-        const CONCURRENCY: usize = 16;
+        results.extend(decompress_entries(entries).await);
 
-        stream::iter(ordered.into_iter().map(|uri| async move {
+        let rest: Vec<_> = stream::iter(fallback.into_iter().map(|uri| async move {
             let result = self.read_async(uri.as_ref()).await;
             (uri, result)
         }))
-        .buffer_unordered(CONCURRENCY)
+        .buffer_unordered(READ_MANY_FALLBACK_CONCURRENCY)
         .collect()
-        .await
+        .await;
+        results.extend(rest);
 
-        /*
-        let mut res = HashMap::new();
-        for uri in ordered {
-            res.insert(uri.clone(), self.read_async(&uri).await);
-        }
-        res
-        */
+        results
+    }
 
-        /*
-        let mut res = HashMap::new();
-        for uri in uris {
-            res.insert(UriAbsoluteStr::to_owned(*uri), self.read_async(&uri).await);
+    // Fetch entries of one archive with coalesced exact-range reads. Returns the
+    // entries found, and the uris that need to go through the regular path.
+    async fn read_archive_entries(
+        &self,
+        archive_path: &str,
+        members: Vec<(UriAbsoluteString, String)>,
+    ) -> Result<
+        (
+            Vec<(UriAbsoluteString, ArchiveEntry)>,
+            Vec<UriAbsoluteString>,
+        ),
+        Error,
+    > {
+        use futures::stream::{self, StreamExt};
+
+        let reader = self.get_reader_async(archive_path).await?;
+        let index = self
+            .get_archive_index_async(archive_path, reader.clone())
+            .await?;
+        // Same namespace as the block cache uses for this archive
+        let namespace = ArchiveIndex::hash_path(archive_path);
+
+        let mut found = vec![];
+        let mut missed = vec![];
+
+        // (offset, end, uri, content_path) of entries not in the entry cache
+        let mut wanted = vec![];
+        for (uri, content_path) in members {
+            let Some(offset) = index.find_offset(&ArchiveIndex::hash_path(&content_path)) else {
+                missed.push(uri);
+                continue;
+            };
+            counter!("porter_archive_entry_cache_queries").increment(1);
+            if let Some(entry) = self.entry_cache.get(&(namespace, offset)) {
+                counter!("porter_archive_entry_cache_hits").increment(1);
+                found.push((uri, entry));
+                continue;
+            }
+            counter!("porter_archive_entry_cache_misses").increment(1);
+            match index.entry_end(offset) {
+                Some(end) if end > offset => wanted.push((offset, end, uri, content_path)),
+                _ => missed.push(uri),
+            }
         }
-        res
-        */
+
+        // Coalesce entries into ranges, in archive order
+        wanted.sort_unstable_by_key(|w| w.0);
+        let mut ranges: Vec<CoalescedRange> = vec![];
+        for (offset, end, uri, content_path) in wanted {
+            match ranges.last_mut() {
+                Some((start, range_end, members))
+                    if offset <= *range_end + COALESCE_GAP_BYTES
+                        && end - *start <= MAX_COALESCED_RANGE_BYTES =>
+                {
+                    *range_end = (*range_end).max(end);
+                    members.push((offset, uri, content_path));
+                }
+                _ => ranges.push((offset, end, vec![(offset, uri, content_path)])),
+            }
+        }
+
+        let fetched: Vec<_> = stream::iter(ranges.into_iter().map(|(start, end, members)| {
+            let reader = reader.clone();
+            async move {
+                counter!("porter_archive_entry_range_reads_total").increment(1);
+                let result = reader.read_range_direct_async(start, end - start).await;
+                (result, start, members)
+            }
+        }))
+        .buffer_unordered(RANGE_READ_CONCURRENCY)
+        .collect()
+        .await;
+
+        for (result, start, members) in fetched {
+            let Ok(buf) = result else {
+                missed.extend(members.into_iter().map(|(_, uri, _)| uri));
+                continue;
+            };
+            for (offset, uri, content_path) in members {
+                let rel = (offset - start) as usize;
+                if rel >= buf.len() {
+                    missed.push(uri);
+                    continue;
+                }
+                match ArchiveEntry::parse(&buf.slice(rel..), &content_path) {
+                    Ok(Some(mut entry)) => {
+                        // Don't let a cached entry pin the whole coalesced buffer
+                        entry.data = Bytes::copy_from_slice(&entry.data);
+                        self.entry_cache.insert((namespace, offset), entry.clone());
+                        found.push((uri, entry));
+                    }
+                    // Collisions, data descriptors and errors are handled (and
+                    // reported) by the regular path
+                    _ => missed.push(uri),
+                }
+            }
+        }
+
+        Ok((found, missed))
     }
 
     // Respect rules in https://github.com/Maxar-Public/3d-tiles/blob/wff1.7.0/extensions/MAXAR_content_3tz/1.0.0/README.md#path-resolver-algorithm
@@ -501,3 +612,52 @@ impl ResourceLoader {
         }
     }
 }
+
+// Decompress entries on the blocking pool, split into chunks across threads
+// rather than one task per entry
+async fn decompress_entries(
+    mut entries: Vec<(UriAbsoluteString, ArchiveEntry)>,
+) -> Vec<(UriAbsoluteString, Result<Bytes, Error>)> {
+    let workers = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let chunk_size = entries
+        .len()
+        .div_ceil(workers)
+        .max(MIN_ENTRIES_PER_DECOMPRESS_TASK);
+
+    let mut tasks = tokio::task::JoinSet::new();
+    // Keep each task's uris so a failed task still reports per-uri errors
+    let mut task_uris = HashMap::new();
+    while !entries.is_empty() {
+        let chunk = entries.split_off(entries.len().saturating_sub(chunk_size));
+        let uris: Vec<_> = chunk.iter().map(|(uri, _)| uri.clone()).collect();
+        let handle = tasks.spawn_blocking(move || {
+            chunk
+                .into_iter()
+                .map(|(uri, entry)| (uri, entry.decompress()))
+                .collect::<Vec<_>>()
+        });
+        task_uris.insert(handle.id(), uris);
+    }
+
+    let mut results = vec![];
+    while let Some(result) = tasks.join_next_with_id().await {
+        match result {
+            Ok((_, decompressed)) => results.extend(decompressed),
+            Err(e) => {
+                for uri in task_uris.remove(&e.id()).unwrap_or_default() {
+                    results.push((
+                        uri,
+                        Err(Error::Decompression(format!(
+                            "Tokio spawn_blocking failed: {e}"
+                        ))),
+                    ));
+                }
+            }
+        }
+    }
+    results
+}
+
+// read_many: one coalesced read, [start, end) of the archive, and the entries in
+// it as (offset, uri, path within the archive)
+type CoalescedRange = (u64, u64, Vec<(u64, UriAbsoluteString, String)>);
