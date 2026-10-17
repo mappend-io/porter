@@ -7,9 +7,11 @@ Most use QuickCache, which evicts with a CLOCK-PRO-style policy.
 
 - **Range readers** (QuickCache, up to 8k instances). Local readers are cheap
   to create (an open and a stat) but hold an open file handle while cached, so
-  size your file descriptor limit accordingly. S3 readers need a `HeadObject`
-  call to fetch the object size, so caching them avoids a round trip per
-  request.
+  size your file descriptor limit accordingly. S3 readers are opened with a
+  single suffix-range `GetObject` for the last 2MiB of the object, which gives
+  its size, and the whole blocks in it are added to the block cache. Archives
+  are read from the end first, so their footer is already cached once the
+  reader is open. Caching readers avoids that request on every read.
 - **Archive indexes** (QuickCache, ~2GiB). Built from the `@3dtilesIndex1@`
   entry of each 3TZ archive the first time it is opened, and used to look up
   files inside the archive by path hash. Cached separately from blocks so that

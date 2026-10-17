@@ -29,6 +29,27 @@ impl CachingRangeReader {
         }
     }
 
+    /// Insert the blocks that lie entirely within `tail` (bytes from
+    /// `tail_offset` to the end of the object) into the cache
+    pub fn seed_from_tail(&self, tail_offset: u64, tail: &Bytes) {
+        let size = self.size();
+        debug_assert_eq!(tail_offset + tail.len() as u64, size);
+
+        let first_block = tail_offset.div_ceil(self.block_size);
+        let mut block_index = first_block;
+        while block_index * self.block_size < size {
+            let start = block_index * self.block_size;
+            let end = std::cmp::min(start + self.block_size, size);
+            // Copy, so the cache doesn't pin the unaligned head of the tail
+            let block = Bytes::copy_from_slice(
+                &tail[(start - tail_offset) as usize..(end - tail_offset) as usize],
+            );
+            self.cache
+                .insert((self.cache_namespace, block_index), block);
+            block_index += 1;
+        }
+    }
+
     async fn fetch_block_async(&self, block_index: u64) -> Result<Bytes, Error> {
         let key = (self.cache_namespace, block_index);
         let cache_result = self.cache.get_value_or_guard_async(&key).await;
@@ -141,5 +162,54 @@ impl RangeReader for CachingRangeReader {
 
     async fn read_range_direct_async(&self, offset: u64, length: u64) -> Result<Bytes, Error> {
         self.reader.read_range_async(offset, length).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct MemReader {
+        data: Bytes,
+        reads: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl RangeReader for MemReader {
+        async fn read_range_async(&self, offset: u64, length: u64) -> Result<Bytes, Error> {
+            self.reads.fetch_add(1, Ordering::Relaxed);
+            let end = std::cmp::min(offset + length, self.data.len() as u64);
+            Ok(self.data.slice(offset as usize..end as usize))
+        }
+        async fn read_from_end_async(&self, length: u64) -> Result<Bytes, Error> {
+            let size = self.size();
+            self.read_range_async(size - length, length).await
+        }
+        fn size(&self) -> u64 {
+            self.data.len() as u64
+        }
+    }
+
+    #[tokio::test]
+    async fn seeded_tail_blocks_need_no_reads() {
+        // 16 byte blocks, 56 bytes: blocks 0-2 are full, block 3 has 8 bytes
+        let data = Bytes::from((0..56u8).collect::<Vec<_>>());
+        let inner = Arc::new(MemReader {
+            data: data.clone(),
+            reads: AtomicUsize::new(0),
+        });
+        let cache = Arc::new(Cache::with_weighter(16, 1024, BytesWeighter));
+        let reader = CachingRangeReader::new(inner.clone(), 16, [0; 16], cache);
+
+        // A tail starting mid-block 1 seeds blocks 2 and 3 only
+        reader.seed_from_tail(20, &data.slice(20..));
+
+        assert_eq!(reader.read_from_end_async(8).await.unwrap(), data.slice(48..));
+        assert_eq!(reader.read_range_async(32, 24).await.unwrap(), data.slice(32..));
+        assert_eq!(inner.reads.load(Ordering::Relaxed), 0);
+
+        assert_eq!(reader.read_range_async(20, 4).await.unwrap(), data.slice(20..24));
+        assert_eq!(inner.reads.load(Ordering::Relaxed), 1);
     }
 }

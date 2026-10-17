@@ -38,6 +38,102 @@ impl S3RangeReader {
             size,
         })
     }
+
+    /// Open an object with a single suffix-range GET instead of a HeadObject:
+    /// the response carries the object's size, and the last `tail_len` bytes
+    /// come along for free. Archives are read from the end first, so this
+    /// saves a round trip when opening one. Returns the reader, and the tail
+    /// with its offset in the object.
+    pub async fn open_with_tail(
+        client: Client,
+        bucket: String,
+        key: String,
+        tail_len: u64,
+    ) -> Result<(Self, u64, Bytes), Error> {
+        let get_output = client
+            .get_object()
+            .bucket(&bucket)
+            .key(&key)
+            .range(format!("bytes=-{tail_len}"))
+            .send()
+            .await
+            .map_err(|e| Error::Io(std::io::Error::other(format!("S3 GetObject failed: {e}"))))?;
+
+        // e.g. "bytes 1000-1999/2000"
+        let total_from_range = get_output
+            .content_range()
+            .and_then(|range| range.rsplit_once('/'))
+            .and_then(|(_, total)| total.parse::<u64>().ok());
+
+        let tail = get_output
+            .body
+            .collect()
+            .await
+            .map_err(|e| {
+                Error::Io(std::io::Error::other(format!(
+                    "Failed to stream S3 body: {e}"
+                )))
+            })?
+            .into_bytes();
+
+        // Without a Content-Range the whole object came back
+        let size = total_from_range.unwrap_or(tail.len() as u64);
+        if size == 0 || (tail.len() as u64) > size {
+            return Err(Error::Io(std::io::Error::other(
+                "S3 object is empty or has an invalid content-range",
+            )));
+        }
+
+        trace!(
+            "Opened s3://{}/{} ({} bytes) with a {} byte tail",
+            bucket,
+            key,
+            size,
+            tail.len()
+        );
+        counter!("porter_s3_range_reads_total").increment(1);
+        counter!("porter_s3_range_read_bytes_total").increment(tail.len() as u64);
+
+        let tail_offset = size - tail.len() as u64;
+        Ok((
+            Self {
+                client,
+                bucket,
+                key,
+                size,
+            },
+            tail_offset,
+            tail,
+        ))
+    }
+}
+
+/// Read a whole object with a single GetObject
+pub async fn read_object(client: &Client, bucket: &str, key: &str) -> Result<Bytes, Error> {
+    let get_output = client
+        .get_object()
+        .bucket(bucket)
+        .key(key)
+        .send()
+        .await
+        .map_err(|e| Error::Io(std::io::Error::other(format!("S3 GetObject failed: {e}"))))?;
+
+    let bytes = get_output
+        .body
+        .collect()
+        .await
+        .map_err(|e| {
+            Error::Io(std::io::Error::other(format!(
+                "Failed to stream S3 body: {e}"
+            )))
+        })?
+        .into_bytes();
+
+    trace!("Read {} bytes from s3://{}/{}", bytes.len(), bucket, key);
+    counter!("porter_s3_range_reads_total").increment(1);
+    counter!("porter_s3_range_read_bytes_total").increment(bytes.len() as u64);
+
+    Ok(bytes)
 }
 
 #[async_trait]

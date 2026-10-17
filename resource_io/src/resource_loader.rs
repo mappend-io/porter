@@ -4,7 +4,7 @@ use super::error::Error;
 use super::file_range_reader::FileRangeReader;
 use super::range_reader::RangeReader;
 use super::{ArchiveEntryWeighter, ArchiveIndexWeighter, BytesWeighter};
-use crate::s3_range_reader::S3RangeReader;
+use crate::s3_range_reader::{self, S3RangeReader};
 use bytes::Bytes;
 use iri_string::types::{UriAbsoluteStr, UriAbsoluteString};
 use metrics::counter;
@@ -26,6 +26,10 @@ const READ_MANY_FALLBACK_CONCURRENCY: usize = 16;
 // Below this many entries per task, the cost of another blocking task outweighs
 // spreading decompression over more threads
 const MIN_ENTRIES_PER_DECOMPRESS_TASK: usize = 16;
+// Bytes read from the end of an S3 object when opening it, which also gets us its
+// size. Two 1MiB blocks, so the last full block and the partial one after it
+// (where zip footers live) are always seeded into the block cache.
+const S3_OPEN_TAIL_BYTES: u64 = 2 * 1_024 * 1_024;
 
 #[derive(Clone)]
 pub struct ResourceLoader {
@@ -145,15 +149,21 @@ impl ResourceLoader {
             "s3" => {
                 let bucket = parsed_uri.authority_str().unwrap().to_string(); // TODO: check for authority, that's the bucket name
                 let path = parsed_uri.path_str().trim_start_matches('/').to_string();
-                let s3_reader =
-                    Arc::new(S3RangeReader::new(self.s3_client.clone(), bucket, path).await?);
+                let (s3_reader, tail_offset, tail) = S3RangeReader::open_with_tail(
+                    self.s3_client.clone(),
+                    bucket,
+                    path,
+                    S3_OPEN_TAIL_BYTES,
+                )
+                .await?;
                 let caching_reader =
                     Arc::new(crate::caching_range_reader::CachingRangeReader::new(
-                        s3_reader,
+                        Arc::new(s3_reader),
                         1 << 20,                      // TODO
                         ArchiveIndex::hash_path(uri), // TODO
                         self.block_cache.clone(),
                     ));
+                caching_reader.seed_from_tail(tail_offset, &tail);
                 Ok(caching_reader as Arc<dyn RangeReader>)
             }
             _ => Err(Error::BadUri("Unsupported uri scheme".to_string())),
@@ -178,13 +188,7 @@ impl ResourceLoader {
                     as Arc<dyn RangeReader>)
             }
             "https" | "http" => todo!(),
-            "s3" => {
-                let bucket = parsed_uri.authority_str().unwrap().to_string();
-                let path = parsed_uri.path_str().trim_start_matches('/').to_string();
-                let s3_reader =
-                    Arc::new(S3RangeReader::new(self.s3_client.clone(), bucket, path).await?);
-                Ok(s3_reader as Arc<dyn RangeReader>)
-            }
+            // S3 objects are read whole with a single GetObject in read_async_uncached
             _ => Err(Error::BadUri("Unsupported uri scheme".to_string())),
         }
     }
@@ -307,6 +311,14 @@ impl ResourceLoader {
             return Err(Error::BadUri(
                 "read_async_uncached does not support archive-embedded uris".to_string(),
             ));
+        }
+
+        if uri.scheme_str() == "s3" {
+            let bucket = uri
+                .authority_str()
+                .ok_or_else(|| Error::BadUri(format!("No bucket in s3 uri {uri}")))?;
+            let key = uri.path_str().trim_start_matches('/');
+            return s3_range_reader::read_object(&self.s3_client, bucket, key).await;
         }
 
         let reader = self.build_uncached_reader(uri.as_str()).await?;
