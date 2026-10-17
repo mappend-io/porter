@@ -2,7 +2,7 @@ use crate::Error;
 use bytes::Bytes;
 
 const LFH_SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x03, 0x04];
-const LFH_LEN: usize = 30;
+pub const LFH_LEN: usize = 30;
 
 // General purpose flag bit 3: sizes and CRC follow the data in a data descriptor
 const FLAG_DATA_DESCRIPTOR: u16 = 1 << 3;
@@ -21,12 +21,23 @@ pub struct ArchiveEntry {
 }
 
 impl ArchiveEntry {
+    /// Content that isn't compressed, e.g. a file outside of any archive
+    pub fn stored(data: Bytes) -> Self {
+        let mut crc = flate2::Crc::new();
+        crc.update(&data);
+        Self {
+            compression_method: METHOD_STORED,
+            crc32: crc.sum(),
+            uncompressed_size: data.len() as u32,
+            data,
+        }
+    }
+
     /// Parse an entry from `buf`, which starts at the entry's local file header
     /// and must extend at least through the end of its compressed data.
     ///
-    /// Returns `Ok(None)` if the entry's filename isn't `expected_path` (an
-    /// index hash collision), or if the entry can't be resolved from `buf`
-    /// alone (data descriptor, or data running past the end of `buf`).
+    /// Returns `Ok(None)` if the entry's filename isn't `expected_path`, i.e. an
+    /// index hash collision.
     pub fn parse(buf: &Bytes, expected_path: &str) -> Result<Option<ArchiveEntry>, Error> {
         if buf.len() < LFH_LEN || buf[0..4] != LFH_SIGNATURE {
             return Err(Error::BadArchive(
@@ -47,7 +58,9 @@ impl ArchiveEntry {
         }
 
         if flags & FLAG_DATA_DESCRIPTOR != 0 {
-            return Ok(None);
+            return Err(Error::BadArchive(format!(
+                "Entry {expected_path} uses a data descriptor, which is not supported"
+            )));
         }
 
         // The 3tz spec caps internal file sizes at 4GB, so standard 32-bit fields are sufficient here
@@ -55,7 +68,9 @@ impl ArchiveEntry {
         let data_start = filename_end + extra_field_len;
         let data_end = data_start + compressed_size;
         if buf.len() < data_end {
-            return Ok(None);
+            return Err(Error::BadArchive(format!(
+                "Entry {expected_path} extends past the end of its read"
+            )));
         }
 
         Ok(Some(ArchiveEntry {
@@ -64,6 +79,20 @@ impl ArchiveEntry {
             uncompressed_size: u32_at(22),
             data: buf.slice(data_start..data_end),
         }))
+    }
+
+    /// Size of the local file header, name, extra field and data, from the
+    /// first [`LFH_LEN`] bytes of an entry
+    pub fn total_len_from_header(lfh: &[u8]) -> Result<u64, Error> {
+        if lfh.len() < LFH_LEN || lfh[0..4] != LFH_SIGNATURE {
+            return Err(Error::BadArchive(
+                "Invalid Local File Header signature".to_string(),
+            ));
+        }
+        let filename_len = u16::from_le_bytes([lfh[26], lfh[27]]) as u64;
+        let extra_field_len = u16::from_le_bytes([lfh[28], lfh[29]]) as u64;
+        let compressed_size = u32::from_le_bytes([lfh[18], lfh[19], lfh[20], lfh[21]]) as u64;
+        Ok(LFH_LEN as u64 + filename_len + extra_field_len + compressed_size)
     }
 
     /// Decompress the entry's data. This is CPU-bound, so callers on the async
@@ -138,14 +167,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_mismatches_without_erroring() {
-        let buf = Bytes::from(lfh("a/b.glb", METHOD_STORED, 0, 0, b"hello", 5, b""));
-        assert!(ArchiveEntry::parse(&buf, "a/c.glb").unwrap().is_none());
-        assert!(
-            ArchiveEntry::parse(&buf.slice(..buf.len() - 1), "a/b.glb")
-                .unwrap()
-                .is_none()
+    fn distinguishes_collisions_from_bad_entries() {
+        let buf = Bytes::from(lfh("a/b.glb", METHOD_STORED, 0, 0, b"hello", 5, b"xx"));
+        assert_eq!(
+            ArchiveEntry::total_len_from_header(&buf).unwrap(),
+            buf.len() as u64
         );
+
+        // A different name is a hash collision, not an error
+        assert!(ArchiveEntry::parse(&buf, "a/c.glb").unwrap().is_none());
+
+        // Truncated data, data descriptors and garbage are errors
+        assert!(ArchiveEntry::parse(&buf.slice(..buf.len() - 1), "a/b.glb").is_err());
         let descriptor = Bytes::from(lfh(
             "a/b.glb",
             METHOD_STORED,
@@ -155,14 +188,18 @@ mod tests {
             5,
             b"",
         ));
-        assert!(
-            ArchiveEntry::parse(&descriptor, "a/b.glb")
-                .unwrap()
-                .is_none()
-        );
+        assert!(ArchiveEntry::parse(&descriptor, "a/b.glb").is_err());
         assert!(
             ArchiveEntry::parse(&Bytes::from_static(b"not a header at all, nope"), "a").is_err()
         );
+    }
+
+    #[test]
+    fn stored_entries_have_a_valid_crc() {
+        let entry = ArchiveEntry::stored(Bytes::from_static(b"hello"));
+        assert_eq!(entry.crc32, 0x3610a686);
+        assert_eq!(entry.uncompressed_size, 5);
+        assert_eq!(&entry.decompress().unwrap()[..], b"hello");
     }
 
     #[test]

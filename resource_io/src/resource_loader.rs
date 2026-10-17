@@ -1,4 +1,4 @@
-use super::archive_entry::ArchiveEntry;
+use super::archive_entry::{ArchiveEntry, LFH_LEN, METHOD_STORED};
 use super::archive_index::ArchiveIndex;
 use super::error::Error;
 use super::file_range_reader::FileRangeReader;
@@ -212,136 +212,85 @@ impl ResourceLoader {
 
     // TODO: Probably keep some other context for a user of this to know if they are in a zip/.3tz/allowing .3tz
     pub async fn read_async(&self, uri: &UriAbsoluteStr) -> Result<Bytes, Error> {
+        let entry = self.read_entry_async(uri).await?;
+        if entry.compression_method == METHOD_STORED {
+            return Ok(entry.data);
+        }
+
+        // Decompress on the blocking pool to avoid blocking the Tokio runtime
+        tokio::task::spawn_blocking(move || entry.decompress())
+            .await
+            .map_err(|e| Error::Decompression(format!("Tokio spawn_blocking failed: {}", e)))?
+    }
+
+    /// Read a resource without decompressing it. Files inside archives keep their
+    /// archive compression, anything else comes back as a stored entry.
+    pub async fn read_entry_async(&self, uri: &UriAbsoluteStr) -> Result<ArchiveEntry, Error> {
         Self::validate_uri(uri)?;
 
-        if let Some((archive_path, content_path)) = Self::split_archive_parts(uri.as_str()) {
-            let reader = self.get_reader_async(&archive_path).await?;
-            let index = self
-                .get_archive_index_async(&archive_path, reader.clone())
-                .await?;
-            let path_md5 = &ArchiveIndex::hash_path(&content_path);
-
-            // 1. Find the base index for the MD5 hash
-            let base_idx = index
-                .entries
-                .binary_search_by(|e| ArchiveIndex::md5_compare(&e.path_md5, path_md5))
-                .map_err(|_| Error::NotFound("File not found in archive index".to_string()))?;
-
-            // Expand to find the full range of matching MD5 hashes (handling collisions)
-            let mut start_idx = base_idx;
-            while start_idx > 0 && index.entries[start_idx - 1].path_md5 == *path_md5 {
-                start_idx -= 1;
-            }
-            let mut end_idx = base_idx;
-            while end_idx < index.entries.len() - 1
-                && index.entries[end_idx + 1].path_md5 == *path_md5
-            {
-                end_idx += 1;
-            }
-
-            // 2. Iterate through matches to verify filename and extract metadata
-            let mut target_file_metadata = None;
-
-            for idx in start_idx..=end_idx {
-                let offset = index.entries[idx].offset;
-
-                // Read the 30-byte static Local File Header
-                let lfh = reader.read_range_async(offset, 30).await?;
-                if lfh.len() < 30 || lfh[0..4] != [0x50, 0x4b, 0x03, 0x04] {
-                    return Err(Error::BadArchive(
-                        "Invalid Local File Header signature".to_string(),
-                    ));
-                }
-
-                let filename_len = u16::from_le_bytes(lfh[26..28].try_into().unwrap()) as u64;
-
-                // Read and verify the filename to confirm this isn't a hash collision
-                let filename_bytes = reader.read_range_async(offset + 30, filename_len).await?;
-                if filename_bytes != content_path.as_bytes() {
-                    continue; // Collision detected: try the next adjacent entry
-                }
-
-                // Match found! Extract remaining metadata.
-                let compression_method = u16::from_le_bytes(lfh[8..10].try_into().unwrap());
-                // The 3tz spec caps internal file sizes at 4GB, so standard 32-bit fields are sufficient here
-                let compressed_size = u32::from_le_bytes(lfh[18..22].try_into().unwrap()) as u64;
-                let uncompressed_size =
-                    u32::from_le_bytes(lfh[22..26].try_into().unwrap()) as usize;
-                let extra_field_len = u16::from_le_bytes(lfh[28..30].try_into().unwrap()) as u64;
-
-                let data_offset = offset + 30 + filename_len + extra_field_len;
-
-                target_file_metadata = Some((
-                    data_offset,
-                    compressed_size,
-                    uncompressed_size,
-                    compression_method,
-                ));
-                break;
-            }
-
-            let (data_offset, compressed_size, uncompressed_size, compression_method) =
-                target_file_metadata.ok_or_else(|| {
-                    Error::NotFound(
-                        "Filename mismatch (hash collision resolved to no valid file)".to_string(),
-                    )
-                })?;
-
-            // 3. Read compressed bytes
-            let compressed_data = reader
-                .read_range_async(data_offset, compressed_size)
-                .await?;
-
-            // 4. Decompress based on method
-            let decompressed_bytes = match compression_method {
-                0 => {
-                    // Stored (No compression)
-                    compressed_data
-                }
-                8 => {
-                    // Deflate (offloaded to blocking pool to avoid blocking the Tokio runtime)
-                    let compressed_data = compressed_data.clone();
-                    tokio::task::spawn_blocking(move || {
-                        use std::io::Read;
-                        let mut decoder = flate2::read::DeflateDecoder::new(&compressed_data[..]);
-                        let mut out = Vec::with_capacity(uncompressed_size);
-                        decoder
-                            .read_to_end(&mut out)
-                            .map_err(|e| Error::Decompression(e.to_string()))?;
-                        Ok::<Bytes, Error>(Bytes::from(out))
-                    })
-                    .await
-                    .map_err(|e| {
-                        Error::Decompression(format!("Tokio spawn_blocking failed: {}", e))
-                    })??
-                }
-                93 => {
-                    // Zstandard (offloaded to blocking pool)
-                    let compressed_data = compressed_data.clone();
-                    tokio::task::spawn_blocking(move || {
-                        let out = zstd::stream::decode_all(&compressed_data[..])
-                            .map_err(|e| Error::Decompression(e.to_string()))?;
-                        Ok::<Bytes, Error>(Bytes::from(out))
-                    })
-                    .await
-                    .map_err(|e| {
-                        Error::Decompression(format!("Tokio spawn_blocking failed: {}", e))
-                    })??
-                }
-                _ => {
-                    return Err(Error::BadArchive(format!(
-                        "Unsupported compression method: {}",
-                        compression_method
-                    )));
-                }
-            };
-
-            Ok(decompressed_bytes)
-        } else {
+        let Some((archive_path, content_path)) = Self::split_archive_parts(uri.as_str()) else {
             let reader = self.get_reader_async(uri.as_str()).await?;
             let bytes = reader.read_range_async(0, reader.size()).await?;
-            Ok(bytes)
+            return Ok(ArchiveEntry::stored(bytes));
+        };
+
+        let reader = self.get_reader_async(&archive_path).await?;
+        let index = self
+            .get_archive_index_async(&archive_path, reader.clone())
+            .await?;
+        let path_md5 = &ArchiveIndex::hash_path(&content_path);
+
+        // 1. Find the base index for the MD5 hash
+        let base_idx = index
+            .entries
+            .binary_search_by(|e| ArchiveIndex::md5_compare(&e.path_md5, path_md5))
+            .map_err(|_| Error::NotFound("File not found in archive index".to_string()))?;
+
+        // Expand to find the full range of matching MD5 hashes (handling collisions)
+        let mut start_idx = base_idx;
+        while start_idx > 0 && index.entries[start_idx - 1].path_md5 == *path_md5 {
+            start_idx -= 1;
         }
+        let mut end_idx = base_idx;
+        while end_idx < index.entries.len() - 1 && index.entries[end_idx + 1].path_md5 == *path_md5
+        {
+            end_idx += 1;
+        }
+
+        // 2. Read each candidate, verifying the filename to rule out hash collisions
+        for idx in start_idx..=end_idx {
+            let offset = index.entries[idx].offset;
+            if let Some(entry) =
+                Self::read_entry_at(&*reader, &index, offset, &content_path).await?
+            {
+                return Ok(entry);
+            }
+        }
+
+        Err(Error::NotFound(
+            "Filename mismatch (hash collision resolved to no valid file)".to_string(),
+        ))
+    }
+
+    // Read the entry whose local header is at `offset`. The index knows where
+    // each entry ends, so the header, name and data come back in a single read
+    // (in parallel blocks, through the block cache) rather than reading the
+    // header first to size the rest.
+    async fn read_entry_at(
+        reader: &dyn RangeReader,
+        index: &ArchiveIndex,
+        offset: u64,
+        content_path: &str,
+    ) -> Result<Option<ArchiveEntry>, Error> {
+        let end = match index.entry_end(offset) {
+            Some(end) if end > offset => end,
+            _ => {
+                let lfh = reader.read_range_async(offset, LFH_LEN as u64).await?;
+                offset + ArchiveEntry::total_len_from_header(&lfh)?
+            }
+        };
+        let buf = reader.read_range_async(offset, end - offset).await?;
+        ArchiveEntry::parse(&buf, content_path)
     }
 
     // Bypasses reader and block caches for a fresh result
