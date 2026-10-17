@@ -119,17 +119,17 @@ impl PrimitiveBuilder {
         Ok(())
     }
 
-    pub fn to_primitive(&self, key: &PrimitiveKey) -> Primitive {
+    pub fn into_primitive(mut self, key: &PrimitiveKey) -> Primitive {
         let mut attributes = BTreeMap::new();
         for attr_key in &key.attributes {
             let buffer = self
                 .attribute_buffers
-                .get(&attr_key.semantic)
+                .remove(&attr_key.semantic)
                 .expect("Buffer must exist for key semantic");
             let attribute = Attribute {
                 component_type: attr_key.component_type,
                 count: self.vertex_count,
-                data: buffer.clone().freeze(), // TODO: consume it, don't clone it
+                data: buffer.freeze(),
                 normalized: attr_key.normalized,
                 r#type: attr_key.r#type.clone(),
             };
@@ -140,7 +140,7 @@ impl PrimitiveBuilder {
             Some(Attribute {
                 component_type: gltf_types::ComponentType::UnsignedInt,
                 count: self.index_count,
-                data: self.index_buffer.clone().freeze(), // TODO: consume it, don't clone it
+                data: self.index_buffer.freeze(),
                 normalized: false,
                 r#type: gltf_types::Type::Scalar,
             })

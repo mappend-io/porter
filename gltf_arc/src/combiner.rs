@@ -98,8 +98,8 @@ impl Combiner {
         {
             let primitives = self
                 .static_prims
-                .iter()
-                .map(|(key, builder)| builder.to_primitive(key))
+                .into_iter()
+                .map(|(key, builder)| builder.into_primitive(&key))
                 .collect();
 
             let mesh = Arc::new(Mesh {
