@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use std::sync::LazyLock;
 
 pub struct PamGeoTransform {
     pub origin_x: f64,
@@ -10,9 +11,10 @@ pub struct PamGeoTransform {
 }
 
 pub fn parse_pam_geotransform(xml: &str) -> Result<PamGeoTransform> {
-    let re =
-        regex::Regex::new(r"<GeoTransform>\s*([^<]+?)\s*</GeoTransform>").expect("Bad GT regex");
-    let caps = re
+    static RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"<GeoTransform>\s*([^<]+?)\s*</GeoTransform>").expect("Bad GT regex")
+    });
+    let caps = RE
         .captures(xml)
         .context("No <GeoTransform> element found")?;
 
