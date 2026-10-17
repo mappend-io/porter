@@ -138,17 +138,19 @@ pub async fn read_content_raster_s2_from_lerc_zstd_tif(
     let gt = parse_pam_geotransform(sidecar_str)
         .with_context(|| format!("Could not parse tif sidecar at {sidecar_uri}"))?;
 
-    let reader = tiff_reader::TiffFile::from_bytes(tif_bytes.to_vec())
-        .with_context(|| format!("Could not open TIFF at {tif_uri}"))?;
-
-    let ifd = reader
-        .ifd(0)
-        .with_context(|| format!("Could not get tif reader ifd with {tif_uri}"))?;
-
-    let width = ifd.width();
-    let height = ifd.height();
-
+    // Parse and decode on the blocking pool
+    let tif_uri_owned = tif_uri.to_string();
     spawn_blocking(move || {
+        let reader = tiff_reader::TiffFile::from_bytes(tif_bytes.to_vec())
+            .with_context(|| format!("Could not open TIFF at {tif_uri_owned}"))?;
+
+        let ifd = reader
+            .ifd(0)
+            .with_context(|| format!("Could not get tif reader ifd with {tif_uri_owned}"))?;
+
+        let width = ifd.width();
+        let height = ifd.height();
+
         let (data, _offset) = reader
             .read_image(0)
             .context("Could not decode tif")?
@@ -625,22 +627,26 @@ pub async fn read_content_raster_s2_from_jpg(
     let gt = parse_pam_geotransform(sidecar_str)
         .with_context(|| format!("Could not parse tif sidecar at {sidecar_uri}"))?;
 
-    // Decode the jpg, no copy
-    use zune_core::bytestream::ZCursor;
-    use zune_jpeg::JpegDecoder;
-    let cursor = ZCursor::new(&jpg_bytes);
-    let mut decoder = JpegDecoder::new(cursor);
-    let pixels = decoder.decode()?;
-    let info = decoder.info().unwrap();
-
-    let width = info.width;
-    let height = info.height;
-
+    // Decode the jpg on the blocking pool, it's the bulk of an imagery tile's work
     spawn_blocking(move || {
-        let data: Vec<_> = pixels
-            .chunks_exact(3)
-            .map(|rgb| glam::u8vec3(rgb[0], rgb[1], rgb[2]))
-            .collect();
+        use zune_core::bytestream::ZCursor;
+        use zune_jpeg::JpegDecoder;
+        let cursor = ZCursor::new(&jpg_bytes);
+        let mut decoder = JpegDecoder::new(cursor);
+        let pixels = decoder.decode()?;
+        let info = decoder.info().context("No JPEG info after decode")?;
+
+        let width = info.width;
+        let height = info.height;
+
+        // Reinterpret the RGB bytes in place, copying only if they can't be
+        let data: Vec<glam::U8Vec3> =
+            bytemuck::allocation::try_cast_vec(pixels).unwrap_or_else(|(_, pixels)| {
+                pixels
+                    .chunks_exact(3)
+                    .map(|rgb| glam::u8vec3(rgb[0], rgb[1], rgb[2]))
+                    .collect()
+            });
 
         let pixel_level_f = -(gt.pixel_width.log2());
         let pixel_level = pixel_level_f.round() as i32;
