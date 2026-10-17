@@ -8,6 +8,7 @@ pub use geo::*;
 pub use utils::*;
 
 mod geo;
+mod pixel_st;
 mod utils;
 mod warp;
 mod warp_imagery;
@@ -432,9 +433,10 @@ pub async fn build_terrarium_rgb_tile(
         let mut output_raster = make_mapzen_elevation_raster_for_tile(&index);
         output_raster.data.fill(encode_elevation_to_mapzen_rgb(0.0));
 
-        // Perform warp
+        // Perform warp, locating output pixels in S2 once for all sources
+        let target_st = elevation_pixel_st_table(&output_raster);
         for s2_raster in &s2_rasters {
-            apply_elevation_warp_from_source(&mut output_raster, s2_raster);
+            apply_elevation_warp_from_source(&mut output_raster, s2_raster, &target_st);
         }
 
         // Encode image to PNG
@@ -541,9 +543,10 @@ pub async fn build_simple_wmts_imagery_tile(
         let mut output_raster = make_wmts_simple_imagery_raster_for_tile(&index);
         output_raster.data.fill(glam::u8vec3(0, 0, 0));
 
-        // Perform warp
+        // Perform warp, locating output pixels in S2 once for all sources
+        let target_st = warp_imagery::imagery_pixel_st_table(&output_raster);
         for s2_raster in &s2_rasters {
-            warp_imagery::apply_imagery_warp_from_source(&mut output_raster, s2_raster);
+            warp_imagery::apply_imagery_warp_from_source(&mut output_raster, s2_raster, &target_st);
         }
 
         // Encode image to PNG

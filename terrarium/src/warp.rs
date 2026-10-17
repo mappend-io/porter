@@ -1,18 +1,26 @@
 use super::*;
+use crate::pixel_st::PixelStTable;
+
+/// Table of pixel centers in S2 st space for `target`, to pass to
+/// [`apply_elevation_warp_from_source`] for each source raster
+pub fn elevation_pixel_st_table(target: &ElevationRasterMapzen) -> PixelStTable {
+    PixelStTable::new(
+        target.tile_index.zoom,
+        (target.origin_x, target.origin_y),
+        (target.resolution_x, target.resolution_y),
+        target.pixel_dims,
+    )
+}
 
 pub fn apply_elevation_warp_from_source(
     target: &mut ElevationRasterMapzen,
     source: &ElevationRasterS2,
+    target_st: &PixelStTable,
 ) {
-    use s2::cellid::CellID;
-    use s2::latlng::LatLng;
-
-    let tgt_w = target.pixel_dims.x;
-    let tgt_h = target.pixel_dims.y;
     let src_w = source.pixel_dims.x;
     let src_h = source.pixel_dims.y;
 
-    debug_assert_eq!(target.data.len(), (tgt_w * tgt_h) as usize);
+    debug_assert_eq!(target.data.len(), target_st.len());
     debug_assert_eq!(source.data.len(), (src_w * src_h) as usize);
 
     // resolution_t is negative; the source raster's row 0 is at the largest t
@@ -22,45 +30,19 @@ pub fn apply_elevation_warp_from_source(
     debug_assert!(source.resolution_t < 0.0);
 
     // TODO: Scrub this to make sure sample locations are perfect in mapzen and s2 st
-    for ty in 0..tgt_h {
-        for tx in 0..tgt_w {
-            let (lat, lon) = mapzen_pixel_to_latlon(target, tx, ty);
+    for (i, face, s, t) in target_st.iter() {
+        if face != source.face {
+            continue;
+        }
 
-            let ll = LatLng::from_degrees(lat, lon);
-            let leaf = CellID::from(&ll);
+        let sx_float = (s - source.origin_s) / source.resolution_s;
+        let sy_float = (t - source.origin_t) / source.resolution_t;
 
-            if leaf.face() != source.face {
-                continue;
-            }
-
-            let leaf_center_st = leaf.bound_st().center();
-            let s = leaf_center_st.x;
-            let t = leaf_center_st.y;
-
-            let sx_float = (s - source.origin_s) / source.resolution_s;
-            let sy_float = (t - source.origin_t) / source.resolution_t;
-
-            if sx_float >= 0.0
-                && sx_float < src_w as f64
-                && sy_float >= 0.0
-                && sy_float < src_h as f64
-            {
-                let result_rgb = sample_bicubic(source, sx_float, sy_float);
-                target.data[(ty * tgt_w + tx) as usize] = result_rgb;
-            }
+        if sx_float >= 0.0 && sx_float < src_w as f64 && sy_float >= 0.0 && sy_float < src_h as f64
+        {
+            target.data[i] = sample_bicubic(source, sx_float, sy_float);
         }
     }
-}
-
-fn mapzen_pixel_to_latlon(raster: &ElevationRasterMapzen, px: i32, py: i32) -> (f64, f64) {
-    use std::f64::consts::PI;
-    let x = raster.origin_x + (px as f64 + 0.5) * raster.resolution_x;
-    let y = raster.origin_y + (py as f64 + 0.5) * raster.resolution_y;
-
-    let n = (1i64 << raster.tile_index.zoom) as f64;
-    let lon = x / n * 360.0 - 180.0;
-    let lat = (PI * (1.0 - 2.0 * y / n)).sinh().atan().to_degrees();
-    (lat, lon)
 }
 
 /// Catmull-Rom cubic interpolation kernel
