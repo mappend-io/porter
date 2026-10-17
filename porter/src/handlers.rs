@@ -248,11 +248,7 @@ pub async fn get_content_payload(
     // This all doesn't belong here, but I am waiting to see what the second transform looks like
     if inline_owt_referenced_models && paths.rest.ends_with(".glb") {
         let mut referenced_models = vec![];
-        let geojson_bytes = app_state
-            .resource_loader
-            .read_async(uri)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let geojson_bytes = bytes.clone();
         let geojson = tokio::task::spawn_blocking(move || GeoJson::from_reader(&geojson_bytes[..]))
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
