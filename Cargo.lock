@@ -1650,6 +1650,7 @@ dependencies = [
  "glam",
  "gltf_io",
  "gltf_types",
+ "indexmap 2.13.1",
  "iri-string",
  "ordered-float",
  "resource_io",

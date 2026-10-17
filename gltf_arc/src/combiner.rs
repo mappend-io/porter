@@ -1,7 +1,8 @@
 use crate::primitive_builder::*;
 use crate::*;
 use anyhow::Result;
-use std::collections::{HashMap, HashSet};
+use indexmap::IndexMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 /// Combine many models into one. We are careful to cache and reuse Materials
@@ -21,7 +22,8 @@ use std::sync::Arc;
 pub struct Combiner {
     local_to_world: glam::DMat4,
     world_to_local: glam::DMat4,
-    static_prims: HashMap<PrimitiveKey, PrimitiveBuilder>,
+    // Insertion-ordered so identical inputs produce identical output
+    static_prims: IndexMap<PrimitiveKey, PrimitiveBuilder>,
     canonical_materials: HashSet<Arc<Material>>,
     // FUTURE: static_lights
     // FUTURE: dynamic_models
@@ -33,7 +35,7 @@ impl Combiner {
         Self {
             local_to_world: local_to_world.as_dmat4(),
             world_to_local: local_to_world.as_dmat4().inverse(),
-            static_prims: HashMap::new(),
+            static_prims: IndexMap::new(),
             canonical_materials: HashSet::new(),
         }
     }
