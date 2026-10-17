@@ -38,3 +38,10 @@ Responses are compressed when the client sends an `Accept-Encoding` that
 allows it, preferring zstd over gzip, at the fastest compression levels.
 Combined models and GeoJSON compress roughly 4x. PNG and JPEG tiles are already
 compressed and are sent as-is.
+
+Files read from 3TZ archives are usually compressed already (deflate, or zstd
+in newer data). When no content transform applies and the client accepts the
+archive's encoding, the compressed bytes are sent as they are: zstd entries as
+`Content-Encoding: zstd` (when their window is at most 8MB, per RFC 9659), and
+deflate entries wrapped as `Content-Encoding: gzip`. Otherwise they are
+decompressed, and compressed again if the client accepts another encoding.

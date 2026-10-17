@@ -95,6 +95,32 @@ impl ArchiveEntry {
         Ok(LFH_LEN as u64 + filename_len + extra_field_len + compressed_size)
     }
 
+    /// Decompress up to the first `len` bytes of the entry's data, e.g. to sniff
+    /// its content type without decompressing all of it.
+    pub fn decompress_prefix(&self, len: usize) -> Result<Vec<u8>, Error> {
+        use std::io::Read;
+        let mut out = Vec::with_capacity(len);
+        let result = match self.compression_method {
+            METHOD_STORED => {
+                out.extend_from_slice(&self.data[..len.min(self.data.len())]);
+                Ok(0)
+            }
+            METHOD_DEFLATE => flate2::read::DeflateDecoder::new(&self.data[..])
+                .take(len as u64)
+                .read_to_end(&mut out),
+            METHOD_ZSTD => zstd::stream::read::Decoder::new(&self.data[..])
+                .and_then(|d| d.take(len as u64).read_to_end(&mut out)),
+            other => {
+                return Err(Error::BadArchive(format!(
+                    "Unsupported compression method: {}",
+                    other
+                )));
+            }
+        };
+        result.map_err(|e| Error::Decompression(e.to_string()))?;
+        Ok(out)
+    }
+
     /// Decompress the entry's data. This is CPU-bound, so callers on the async
     /// runtime should run it on the blocking pool.
     pub fn decompress(&self) -> Result<Bytes, Error> {
@@ -221,6 +247,7 @@ mod tests {
         ));
         let entry = ArchiveEntry::parse(&buf, "x").unwrap().unwrap();
         assert_eq!(entry.decompress().unwrap(), payload);
+        assert_eq!(entry.decompress_prefix(10).unwrap(), payload[..10]);
 
         let zstded = zstd::stream::encode_all(&payload[..], 3).unwrap();
         let buf = Bytes::from(lfh(
@@ -234,5 +261,7 @@ mod tests {
         ));
         let entry = ArchiveEntry::parse(&buf, "x").unwrap().unwrap();
         assert_eq!(entry.decompress().unwrap(), payload);
+        assert_eq!(entry.decompress_prefix(10).unwrap(), payload[..10]);
+        assert_eq!(entry.decompress_prefix(100_000).unwrap(), payload);
     }
 }

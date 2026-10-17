@@ -2817,6 +2817,7 @@ dependencies = [
  "bytesize",
  "clap",
  "dotenvy",
+ "flate2",
  "futures",
  "geojson",
  "glam",
@@ -2844,6 +2845,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "transforms",
+ "zstd",
 ]
 
 [[package]]

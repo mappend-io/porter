@@ -1,9 +1,10 @@
 use crate::app_state::AppState;
+use crate::content_encoding::entry_response;
 use crate::tiles3d;
 use crate::utils::*;
 use anyhow::{Context, Result};
 use axum::http::{HeaderMap, HeaderValue, header};
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::{Json, extract::Path, extract::Query, extract::State, http::StatusCode};
 use geojson::{GeoJson, Geometry, GeometryValue};
 use iri_string::types::{UriAbsoluteStr, UriReferenceStr, UriRelativeStr};
@@ -211,7 +212,8 @@ pub struct GetContentPayloadPaths {
 pub async fn get_content_payload(
     State(app_state): State<AppState>,
     Path(paths): Path<GetContentPayloadPaths>,
-) -> Result<impl IntoResponse, StatusCode> {
+    request_headers: HeaderMap,
+) -> Result<Response, StatusCode> {
     let layer_def = app_state
         .get_layer_definition(&paths.id)
         .await
@@ -239,6 +241,21 @@ pub async fn get_content_payload(
 
     let uri = UriAbsoluteStr::new(&resolved).map_err(|_| StatusCode::BAD_REQUEST)?;
 
+    // Untransformed content is served as stored, still compressed if the client
+    // accepts the archive's encoding
+    if !(inline_owt_referenced_models && paths.rest.ends_with(".glb")) {
+        let entry = app_state
+            .resource_loader
+            .read_entry_async(uri)
+            .await
+            .map_err(|_| StatusCode::NOT_FOUND)?; // TODO: distinguish 404 vs 500
+
+        // TODO: Add s2_level
+        counter!("porter_content_3dtiles_tiles_total").increment(1);
+
+        return entry_response(entry, &request_headers).await;
+    }
+
     let mut bytes = app_state
         .resource_loader
         .read_async(uri)
@@ -246,7 +263,7 @@ pub async fn get_content_payload(
         .map_err(|_| StatusCode::NOT_FOUND)?; // TODO: distinguish 404 vs 500
 
     // This all doesn't belong here, but I am waiting to see what the second transform looks like
-    if inline_owt_referenced_models && paths.rest.ends_with(".glb") {
+    {
         let mut referenced_models = vec![];
         let geojson_bytes = bytes.clone();
         let geojson = tokio::task::spawn_blocking(move || GeoJson::from_reader(&geojson_bytes[..]))
@@ -381,7 +398,7 @@ pub async fn get_content_payload(
     // TODO: Add s2_level
     counter!("porter_content_3dtiles_tiles_total").increment(1);
 
-    Ok((headers, bytes))
+    Ok((headers, bytes).into_response())
 }
 
 #[derive(Deserialize)]
@@ -393,7 +410,8 @@ pub struct GetBaseGlobeTerrainPayloadPaths {
 pub async fn get_base_globe_terrain_payload(
     State(app_state): State<AppState>,
     Path(paths): Path<GetBaseGlobeTerrainPayloadPaths>,
-) -> Result<impl IntoResponse, StatusCode> {
+    request_headers: HeaderMap,
+) -> Result<Response, StatusCode> {
     let layer_def = app_state
         .get_layer_definition(&paths.id)
         .await
@@ -409,20 +427,16 @@ pub async fn get_base_globe_terrain_payload(
         paths.rest
     );
     let uri = UriAbsoluteStr::new(&glb_uri).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let bytes = app_state
+    let entry = app_state
         .resource_loader
-        .read_async(uri)
+        .read_entry_async(uri)
         .await
         .map_err(|_| StatusCode::NOT_FOUND)?; // TODO: distinguish 404 vs 500
-
-    let content_type = sniff_content_type(&bytes);
-    let mut headers = HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
 
     // TODO: Would be nice to capture s2 level here
     counter!("porter_low_res_globe_passthrough_tiles_total").increment(1);
 
-    Ok((headers, bytes))
+    entry_response(entry, &request_headers).await
 }
 
 #[derive(Debug, Deserialize)]

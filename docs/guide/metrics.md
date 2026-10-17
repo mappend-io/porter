@@ -35,6 +35,9 @@ these metrics.
   source data
 - `porter_low_res_globe_passthrough_tiles_total`: Payloads served from a
   layer's `baseGlobeTerrainUri` backfill
+- `porter_archive_entry_passthrough_total`: Payloads sent with their archive
+  compression intact rather than decompressed, labeled by `encoding` (`zstd` or
+  `gzip`). Counted in addition to the two counters above.
 - `porter_terrarium_tiles_total`: Mapzen Terrarium elevation tiles served,
   labeled by `zoom_level`. Empty fallback tiles are counted too.
 - `porter_wmts_simple_tiles_total`: WMTS Simple imagery tiles served, labeled

@@ -49,3 +49,7 @@ axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 
 [target.'cfg(target_env = "musl")'.dependencies]
 mimalloc = "0.1.52"
+
+[dev-dependencies]
+flate2 = "1.1.9"
+zstd = "0.13.3"

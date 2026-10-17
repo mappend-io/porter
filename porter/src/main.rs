@@ -21,6 +21,7 @@ use tracing::info;
 
 pub mod app_state;
 pub mod config;
+pub mod content_encoding;
 pub mod emulation;
 pub mod handlers;
 pub mod layer_definition;
