@@ -31,3 +31,10 @@ Most use QuickCache, which evicts with a CLOCK-PRO-style policy.
   default `5m`). Layer definitions are always read fresh from the source,
   skipping the reader and block caches, so an updated definition takes effect
   once its TTL expires.
+
+# Response compression
+
+Responses are compressed when the client sends an `Accept-Encoding` that
+allows it, preferring zstd over gzip, at the fastest compression levels.
+Combined models and GeoJSON compress roughly 4x. PNG and JPEG tiles are already
+compressed and are sent as-is.

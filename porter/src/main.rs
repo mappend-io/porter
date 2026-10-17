@@ -13,6 +13,8 @@ use moka::future::Cache;
 use resource_io::{ResourceLoader, ResourceLoaderConfig};
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tower_http::CompressionLevel;
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::info;
@@ -179,7 +181,12 @@ async fn main() -> Result<()> {
         ),
     };
 
+    // Compress responses for clients that accept it, preferring zstd. Fastest
+    // levels still get most of the ratio on tiles (~4x on combined GLBs and
+    // GeoJSON) at a fraction of the CPU. Images and responses that already
+    // carry a Content-Encoding are left alone.
     let app = app
+        .layer(CompressionLayer::new().quality(CompressionLevel::Fastest))
         .layer(from_fn(security_headers))
         .layer(TraceLayer::new_for_http());
 
