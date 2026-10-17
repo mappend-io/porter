@@ -205,11 +205,20 @@ mod tests {
         // A tail starting mid-block 1 seeds blocks 2 and 3 only
         reader.seed_from_tail(20, &data.slice(20..));
 
-        assert_eq!(reader.read_from_end_async(8).await.unwrap(), data.slice(48..));
-        assert_eq!(reader.read_range_async(32, 24).await.unwrap(), data.slice(32..));
+        assert_eq!(
+            reader.read_from_end_async(8).await.unwrap(),
+            data.slice(48..)
+        );
+        assert_eq!(
+            reader.read_range_async(32, 24).await.unwrap(),
+            data.slice(32..)
+        );
         assert_eq!(inner.reads.load(Ordering::Relaxed), 0);
 
-        assert_eq!(reader.read_range_async(20, 4).await.unwrap(), data.slice(20..24));
+        assert_eq!(
+            reader.read_range_async(20, 4).await.unwrap(),
+            data.slice(20..24)
+        );
         assert_eq!(inner.reads.load(Ordering::Relaxed), 1);
     }
 }

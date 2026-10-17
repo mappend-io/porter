@@ -208,20 +208,31 @@ impl ArchiveIndex {
             i += 4 + size;
         }
 
-        // Read Local File Header (LFH) to skip its metadata and get to the raw bytes
-        let lfh_bytes = reader.read_range_async(local_header_offset, 30).await?;
-        if lfh_bytes.len() < 30 || lfh_bytes[0..4] != LFH_SIGNATURE {
+        // Read the index's Local File Header (LFH) and data in one request. The
+        // LFH carries the same name as the central directory entry, and usually
+        // an extra field of the same size; if it doesn't, read the data again.
+        let expected_len = 30 + filename_len as u64 + extra_field_len as u64 + data_size;
+        let entry_bytes = reader
+            .read_range_async(local_header_offset, expected_len)
+            .await?;
+        if entry_bytes.len() < 30 || entry_bytes[0..4] != LFH_SIGNATURE {
             return Err(Error::BadArchive(
                 "Invalid Local File Header signature".to_string(),
             ));
         }
 
-        let lfh_n = u16::from_le_bytes(lfh_bytes[26..28].try_into().unwrap()) as u64;
-        let lfh_m = u16::from_le_bytes(lfh_bytes[28..30].try_into().unwrap()) as u64;
+        let lfh_n = u16::from_le_bytes(entry_bytes[26..28].try_into().unwrap()) as u64;
+        let lfh_m = u16::from_le_bytes(entry_bytes[28..30].try_into().unwrap()) as u64;
 
-        // 6. Read Raw Bytes of the index
-        let data_start = local_header_offset + 30 + lfh_n + lfh_m;
-        let raw_bytes = reader.read_range_async(data_start, data_size).await?;
+        // 6. Raw Bytes of the index
+        let data_rel = 30 + lfh_n + lfh_m;
+        let raw_bytes = if data_rel + data_size <= entry_bytes.len() as u64 {
+            entry_bytes.slice(data_rel as usize..(data_rel + data_size) as usize)
+        } else {
+            reader
+                .read_range_async(local_header_offset + data_rel, data_size)
+                .await?
+        };
 
         tokio::task::spawn_blocking(move || {
             Ok(ArchiveIndex::from_sorted_entries(
