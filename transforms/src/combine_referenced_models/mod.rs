@@ -106,28 +106,20 @@ pub async fn combine_referenced_models(
         .unique()
         .collect();
 
-    // Read them all into gltf_types::Documents
-    let mut models = read_many_glbs(&unique_uris, resource_loader).await?;
+    // Read them all into gltf_arc::Documents, with URIs rewritten as if each
+    // model were co-located with the .geojson
+    let models = read_many_models(
+        &unique_uris,
+        content_root_uri,
+        content_geojson_uri,
+        resource_loader,
+    )
+    .await?;
 
-    // Rewrite URIs in each model as if it were co-located with the .geojson
-    for (uri, doc) in &mut models {
-        rewrite_uris_for_combining(doc, content_root_uri, content_geojson_uri, uri)?;
-    }
-
-    // Convert from gltf_types to gltf_arc for combining and combine them
-    // (offloaded to blocking pool to avoid blocking Tokio runtime on large inputs)
+    // Combine them (offloaded to blocking pool to avoid blocking Tokio runtime on large inputs)
     let references = referenced_models.to_vec();
     let doc = tokio::task::spawn_blocking(move || {
-        let arc_models = models
-            .into_iter()
-            .map(|(uri, doc)| {
-                let converted = gltf_arc::Document::try_from(&doc)
-                    .with_context(|| format!("Failed to convert document: {uri}"))?;
-                Ok((uri, converted))
-            })
-            .collect::<Result<BTreeMap<_, _>>>()?;
-
-        combine_many_glbs(arc_models, &references, combined_model_matrix)
+        combine_many_glbs(models, &references, combined_model_matrix)
     })
     .await
     .map_err(|e| anyhow::anyhow!("spawn_blocking failed: {}", e))??;
@@ -135,28 +127,70 @@ pub async fn combine_referenced_models(
     Ok(doc)
 }
 
-// Fetch all of the unique model URIs in parallel (ordered for cache coherency)
-// and parse each into a gltf_types::Document.
-async fn read_many_glbs(
+// Below this many models per task, the cost of another blocking task outweighs
+// spreading the parse over more threads
+const MIN_MODELS_PER_PARSE_TASK: usize = 16;
+
+// Fetch all of the unique model URIs in parallel (ordered for cache coherency),
+// then parse, rewrite and convert each into a gltf_arc::Document. Parsing is
+// split into chunks across blocking threads rather than one task per model, a
+// tile can reference thousands of models.
+async fn read_many_models(
     uris: &[&UriAbsoluteStr],
+    content_root_uri: &UriAbsoluteStr,
+    content_geojson_uri: &UriAbsoluteStr,
     resource_loader: ResourceLoader,
-) -> Result<BTreeMap<UriAbsoluteString, gltf_types::Document>> {
+) -> Result<BTreeMap<UriAbsoluteString, gltf_arc::Document>> {
     // TODO: Pipeline reads and parses — process each model as its bytes arrive
     // rather than waiting for all reads to complete before starting any parsing.
-    let res = resource_loader.read_many(uris).await;
+    let mut res = resource_loader.read_many(uris).await;
 
-    let mut documents = BTreeMap::new();
+    let mut inputs = Vec::with_capacity(uris.len());
     for uri in uris {
         let key = UriAbsoluteStr::to_owned(uri);
-        let bytes = match res.get(&key) {
+        let bytes = match res.remove(&key) {
             Some(Ok(b)) => b,
             Some(Err(e)) => return Err(anyhow::anyhow!("Failed to read {uri}: {e}")),
             None => return Err(anyhow::anyhow!("No result returned for URI: {uri}")),
         };
-        let raw = gltf_io::read::read_model(bytes.clone(), uri)
-            .await
-            .with_context(|| format!("Failed to parse model: {uri}"))?;
-        documents.insert(key, raw);
+        inputs.push((key, bytes));
+    }
+
+    let workers = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let chunk_size = inputs
+        .len()
+        .div_ceil(workers)
+        .max(MIN_MODELS_PER_PARSE_TASK);
+
+    let mut tasks = tokio::task::JoinSet::new();
+    while !inputs.is_empty() {
+        let chunk = inputs.split_off(inputs.len().saturating_sub(chunk_size));
+        let content_root_uri = content_root_uri.to_owned();
+        let content_geojson_uri = content_geojson_uri.to_owned();
+        tasks.spawn_blocking(move || {
+            chunk
+                .into_iter()
+                .map(|(uri, bytes)| {
+                    let mut raw = gltf_io::read::parse_model(bytes, &uri)
+                        .with_context(|| format!("Failed to parse model: {uri}"))?;
+                    rewrite_uris_for_combining(
+                        &mut raw,
+                        &content_root_uri,
+                        &content_geojson_uri,
+                        &uri,
+                    )?;
+                    let converted = gltf_arc::Document::try_from(&raw)
+                        .with_context(|| format!("Failed to convert document: {uri}"))?;
+                    Ok((uri, converted))
+                })
+                .collect::<Result<Vec<_>>>()
+        });
+    }
+
+    let mut documents = BTreeMap::new();
+    while let Some(result) = tasks.join_next().await {
+        let parsed = result.map_err(|e| anyhow::anyhow!("spawn_blocking failed: {}", e))??;
+        documents.extend(parsed);
     }
 
     Ok(documents)
