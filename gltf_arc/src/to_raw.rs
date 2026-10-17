@@ -44,7 +44,8 @@ impl Converter {
             uri: None,
             byte_length: conv.buffer.len() as u32,
             name: None,
-            property: gltf_types::Property::default(),
+            extensions: None,
+            extras: None,
         });
 
         Ok((conv.raw_doc, conv.buffer.freeze()))
@@ -59,7 +60,8 @@ impl Converter {
         let raw_scene = gltf_types::Scene {
             name: scene.name.clone(),
             nodes,
-            property: gltf_types::Property::default(),
+            extensions: None,
+            extras: None,
         };
 
         self.raw_doc.scenes.push(raw_scene);
@@ -100,7 +102,8 @@ impl Converter {
             skin: None,
             weights: vec![],
             children,
-            property: gltf_types::Property::default(),
+            extensions: None,
+            extras: None,
         };
 
         self.raw_doc.nodes.push(raw_node);
@@ -122,7 +125,8 @@ impl Converter {
         let raw_mesh = gltf_types::Mesh {
             name: mesh.name.clone(),
             primitives,
-            property: gltf_types::Property::default(),
+            extensions: None,
+            extras: None,
         };
 
         self.raw_doc.meshes.push(raw_mesh);
@@ -156,7 +160,8 @@ impl Converter {
             byte_stride: None, // We pack tightly, no interleaving
             target: Some(target),
             name: None,
-            property: gltf_types::Property::default(),
+            extensions: None,
+            extras: None,
         };
 
         self.raw_doc.buffer_views.push(buffer_view);
@@ -197,7 +202,8 @@ impl Converter {
             min,
             max,
             name: None,
-            property: gltf_types::Property::default(),
+            extensions: None,
+            extras: None,
         };
 
         self.raw_doc.accessors.push(accessor);
@@ -266,7 +272,8 @@ impl Converter {
             alpha_cutoff: Some(material.alpha_cutoff.into()),               // TODO: skip if default
             double_sided: material.double_sided,
             name: material.name.clone(),
-            property: gltf_types::Property::default(),
+            extensions: None,
+            extras: None,
         };
 
         if material.alpha_mode == gltf_types::AlphaMode::Mask {
@@ -297,7 +304,8 @@ impl Converter {
                 .as_ref()
                 .map(|t| self.texture_info(t))
                 .transpose()?,
-            property: gltf_types::Property::default(),
+            extensions: None,
+            extras: None,
         })
     }
 
@@ -309,7 +317,8 @@ impl Converter {
             index: self.texture(&texture_info.texture)?,
             strength: Some(texture_info.strength.into()), // TODO: skip if default
             tex_coord: Some(texture_info.tex_coord),      // TODO: skip if default
-            property: gltf_types::Property::default(),
+            extensions: None,
+            extras: None,
         })
     }
 
@@ -321,7 +330,8 @@ impl Converter {
             index: self.texture(&texture_info.texture)?,
             scale: Some(texture_info.scale.into()), // TODO: skip if default
             tex_coord: Some(texture_info.tex_coord), // TODO: skip if default
-            property: gltf_types::Property::default(),
+            extensions: None,
+            extras: None,
         })
     }
 
@@ -329,7 +339,8 @@ impl Converter {
         Ok(gltf_types::TextureInfo {
             index: self.texture(&texture_info.texture)?,
             tex_coord: Some(texture_info.tex_coord), // TODO: skip if default
-            property: gltf_types::Property::default(),
+            extensions: None,
+            extras: None,
         })
     }
 
@@ -341,7 +352,8 @@ impl Converter {
         let texture_index = gltf_types::TextureIndex(self.raw_doc.textures.len() as u32);
         let raw_texture = gltf_types::Texture {
             name: texture.name.clone(),
-            property: gltf_types::Property::default(),
+            extensions: None,
+            extras: None,
             sampler: Some(self.sampler(&texture.sampler)?), // TODO: skip if default
             source: texture.source.as_ref().map(|s| self.image(s)).transpose()?,
         };
@@ -374,7 +386,8 @@ impl Converter {
                     byte_stride: None,
                     target: None,
                     name: None,
-                    property: gltf_types::Property::default(),
+                    extensions: None,
+                    extras: None,
                 };
 
                 self.raw_doc.buffer_views.push(new_buffer_view);
@@ -393,7 +406,8 @@ impl Converter {
         let image_index = gltf_types::ImageIndex(self.raw_doc.images.len() as u32);
         let raw_image = gltf_types::Image {
             name: image.name.clone(),
-            property: gltf_types::Property::default(),
+            extensions: None,
+            extras: None,
             buffer_view,
             mime_type,
             uri,
@@ -416,7 +430,8 @@ impl Converter {
             wrap_s: Some(sampler.wrap_s), // TODO: don't set if default
             wrap_t: Some(sampler.wrap_t), // TODO: don't set if default
             name: sampler.name.clone(),
-            property: gltf_types::Property::default(),
+            extensions: None,
+            extras: None,
         };
         self.raw_doc.samplers.push(raw_sampler);
 

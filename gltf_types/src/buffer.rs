@@ -1,4 +1,3 @@
-use super::*;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
@@ -23,9 +22,11 @@ pub struct Buffer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 
-    #[serde(flatten)]
-    #[validate(nested)]
-    pub property: Property,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<serde_json::Value>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extras: Option<serde_json::Value>,
 }
 
 /*

@@ -25,9 +25,11 @@ pub struct BufferView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 
-    #[serde(flatten)]
-    #[validate(nested)]
-    pub property: Property,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<serde_json::Value>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extras: Option<serde_json::Value>,
 }
 
 impl BufferView {

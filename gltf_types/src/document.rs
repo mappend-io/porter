@@ -67,9 +67,11 @@ pub struct Document {
     #[validate(nested)]
     pub textures: Vec<Texture>,
 
-    #[serde(flatten)]
-    #[validate(nested)]
-    pub property: Property,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<serde_json::Value>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extras: Option<serde_json::Value>,
 }
 
 pub fn validate_model(model: &Document) -> Result<(), ValidationError> {

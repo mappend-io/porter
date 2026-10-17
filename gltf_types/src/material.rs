@@ -12,9 +12,11 @@ pub struct PbrMetallicRoughness {
     pub metallic_factor: Option<f32>,
     pub roughness_factor: Option<f32>,
     pub metallic_roughness_texture: Option<TextureInfo>,
-    #[serde(flatten)]
-    #[validate(nested)]
-    pub property: Property,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<serde_json::Value>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extras: Option<serde_json::Value>,
 }
 
 impl PbrMetallicRoughness {
@@ -46,9 +48,11 @@ pub struct NormalTextureInfo {
     #[validate(range(min = 0.0, max = 1.0))]
     pub scale: Option<f32>,
 
-    #[serde(flatten)]
-    #[validate(nested)]
-    pub property: Property,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<serde_json::Value>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extras: Option<serde_json::Value>,
 }
 
 impl NormalTextureInfo {
@@ -76,9 +80,11 @@ pub struct OcclusionTextureInfo {
     #[validate(range(min = 0.0, max = 1.0))]
     pub strength: Option<f32>,
 
-    #[serde(flatten)]
-    #[validate(nested)]
-    pub property: Property,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<serde_json::Value>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extras: Option<serde_json::Value>,
 }
 
 impl OcclusionTextureInfo {
@@ -104,9 +110,11 @@ pub struct Material {
     pub alpha_cutoff: Option<f32>,
     pub double_sided: bool,
     pub name: Option<String>,
-    #[serde(flatten)]
-    #[validate(nested)]
-    pub property: Property,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<serde_json::Value>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extras: Option<serde_json::Value>,
 }
 
 impl Material {
