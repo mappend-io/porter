@@ -319,7 +319,7 @@ pub async fn get_content_payload(
     // TODO: Add s2_level
     counter!("porter_content_3dtiles_tiles_total").increment(1);
 
-    entry_response(entry, &request_headers).await
+    entry_response(&paths.rest, entry, &request_headers).await
 }
 
 #[derive(Deserialize)]
@@ -357,7 +357,7 @@ pub async fn get_base_globe_terrain_payload(
     // TODO: Would be nice to capture s2 level here
     counter!("porter_low_res_globe_passthrough_tiles_total").increment(1);
 
-    entry_response(entry, &request_headers).await
+    entry_response(&paths.rest, entry, &request_headers).await
 }
 
 #[derive(Debug, Deserialize)]

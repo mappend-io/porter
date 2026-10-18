@@ -63,9 +63,11 @@ impl AcceptedEncodings {
     }
 }
 
-/// Respond with an archive entry, passing its compressed data through when the
-/// client accepts the encoding, and decompressing it otherwise.
+/// Respond with the archive entry at `path`, passing its compressed data
+/// through when the client accepts the encoding, and decompressing it
+/// otherwise.
 pub async fn entry_response(
+    path: &str,
     entry: ArchiveEntry,
     request_headers: &HeaderMap,
 ) -> Result<Response, StatusCode> {
@@ -75,18 +77,16 @@ pub async fn entry_response(
 
     let accepted = AcceptedEncodings::from_headers(request_headers);
     if let Some((encoding, body)) = passthrough_body(&entry, accepted) {
-        let prefix = entry
-            .decompress_prefix(SNIFF_PREFIX_BYTES)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         headers.insert(
             header::CONTENT_TYPE,
-            HeaderValue::from_static(sniff_content_type(&prefix)),
+            HeaderValue::from_static(entry_content_type(path, &entry)?),
         );
         headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static(encoding));
         counter!("porter_archive_entry_passthrough_total", "encoding" => encoding).increment(1);
         return Ok((headers, body).into_response());
     }
 
+    let content_type = entry_content_type(path, &entry)?;
     let bytes = if entry.compression_method == METHOD_STORED {
         entry.data
     } else {
@@ -95,11 +95,26 @@ pub async fn entry_response(
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     };
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static(sniff_content_type(&bytes)),
-    );
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
     Ok((headers, bytes).into_response())
+}
+
+/// The content type of the entry at `path`. Known extensions settle it without
+/// touching the data; anything else is sniffed from a decompressed prefix,
+/// which for zstd means setting up a decoder and its window.
+fn entry_content_type(path: &str, entry: &ArchiveEntry) -> Result<&'static str, StatusCode> {
+    let extension = path
+        .rsplit_once('.')
+        .map(|(_, ext)| ext.to_ascii_lowercase());
+    match extension.as_deref() {
+        Some("glb") => return Ok("model/gltf-binary"),
+        Some("json" | "geojson" | "gltf") => return Ok("application/json"),
+        _ => {}
+    }
+    let prefix = entry
+        .decompress_prefix(SNIFF_PREFIX_BYTES)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(sniff_content_type(&prefix))
 }
 
 // The entry's data framed for a Content-Encoding the client accepts, if any
@@ -263,6 +278,35 @@ mod tests {
             None
         );
         assert_eq!(zstd_frame_window_size(b"glTF...."), None);
+    }
+
+    #[test]
+    fn content_types_come_from_the_path_when_it_has_a_known_extension() {
+        // The data says JSON, the name says GLB: the name wins, nothing is decoded
+        let entry = ArchiveEntry::stored(Bytes::from_static(b"{}"));
+        assert_eq!(
+            entry_content_type("1/12/3/4.glb", &entry).unwrap(),
+            "model/gltf-binary"
+        );
+        assert_eq!(
+            entry_content_type("tileset.JSON", &entry).unwrap(),
+            "application/json"
+        );
+        assert_eq!(
+            entry_content_type("a/b.geojson", &entry).unwrap(),
+            "application/json"
+        );
+
+        // Unknown extensions are sniffed
+        let glb = ArchiveEntry::stored(Bytes::from_static(b"glTF...."));
+        assert_eq!(
+            entry_content_type("models/x.bin", &glb).unwrap(),
+            "model/gltf-binary"
+        );
+        assert_eq!(
+            entry_content_type("noextension", &entry).unwrap(),
+            "application/json"
+        );
     }
 
     #[test]
