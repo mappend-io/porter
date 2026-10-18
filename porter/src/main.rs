@@ -162,7 +162,7 @@ async fn main() -> Result<()> {
         .layer(prometheus_layer);
 
     #[cfg(feature = "embedded-viewer")]
-    let app = app.fallback(viewer::static_handler);
+    let app = viewer::root_file_routes(app).fallback(viewer::static_handler);
 
     #[cfg(feature = "embedded-viewer")]
     let app = app
