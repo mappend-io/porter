@@ -58,6 +58,18 @@ impl LayerDefinition {
             .replace("{CONTENT_ROOT_TOKEN}", content_root_token)
     }
 
+    /// The source content for the package holding this cell, if the cell is at
+    /// or below the package level
+    pub fn content_package_uri(&self, face: u8, level: i32, col: i32, row: i32) -> Option<String> {
+        if level < self.source_s2_content_package_level {
+            return None;
+        }
+        let token = cell_id_from_face_level_col_row(face, level, col, row)
+            .parent(self.source_s2_content_package_level as u64)
+            .to_token();
+        Some(self.resolve_content_uri_template(&token))
+    }
+
     pub fn hash(&self) -> String {
         // TODO: This is fragile if metadata fields are populated using any hashmap values.
         // Revisit this: canonicalize it somehow before hashing.

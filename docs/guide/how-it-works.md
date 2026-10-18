@@ -14,8 +14,11 @@ Most use QuickCache, which evicts with a CLOCK-PRO-style policy.
   reader is open. Caching readers avoids that request on every read.
 - **Archive indexes** (QuickCache, ~2GiB). Built from the `@3dtilesIndex1@`
   entry of each 3TZ archive the first time it is opened, and used to look up
-  files inside the archive by path hash. Cached separately from blocks so that
-  block churn doesn't evict them.
+  files inside the archive by path hash. The index is fetched in one request
+  and cached separately from blocks, so block churn doesn't evict it. When a
+  viewer requests a generated tileset above a layer's content levels, Porter
+  opens that cell's package archive in the background, so the index is usually
+  loaded before the first content request arrives.
 - **Block cache** (QuickCache, `BLOCK_CACHE_SIZE`, default `2GiB`). S3 objects
   are read in 1MiB blocks, which are cached and shared across all readers. This
   is where most memory goes; make it as large as your hardware allows. The

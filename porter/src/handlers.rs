@@ -161,6 +161,25 @@ pub async fn get_child_tileset(
         .get_layer_definition(&paths.id)
         .await
         .map_err(|_| StatusCode::NOT_FOUND)?;
+    // Above the content levels, the client will soon ask for content from this
+    // cell's package. Open its archive now, so that request doesn't wait for
+    // the archive index.
+    if paths.level < layer_def.source_s2_content_min_level
+        && let Some(archive_uri) =
+            layer_def.content_package_uri(paths.face, paths.level, paths.col, row)
+    {
+        let resource_loader = app_state.resource_loader.clone();
+        counter!("porter_archive_prefetches_total").increment(1);
+        tokio::spawn(async move {
+            let Ok(uri) = UriAbsoluteStr::new(&archive_uri) else {
+                return;
+            };
+            if let Err(e) = resource_loader.open_archive_async(uri).await {
+                tracing::debug!("Could not prefetch archive {}: {:?}", archive_uri, e);
+            }
+        });
+    }
+
     let tileset = layer_def.synthesize_tileset(paths.face, paths.level, paths.col, row);
     Ok(Json(tileset))
 }

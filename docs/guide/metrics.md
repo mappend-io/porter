@@ -105,3 +105,10 @@ is for one entry:
   usually lower than misses.
 
 A low hit rate under steady traffic suggests increasing `ENTRY_CACHE_SIZE`.
+
+### Archive prefetch
+
+- `porter_archive_prefetches_total`: Background archive opens started while
+  serving a generated tileset above a layer's content levels. An archive that
+  is already open is not read again, so this counts tileset requests, not S3
+  reads.

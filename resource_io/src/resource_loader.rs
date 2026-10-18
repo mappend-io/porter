@@ -214,6 +214,19 @@ impl ResourceLoader {
         }
     }
 
+    /// Open an archive and load its index into the caches, without reading an
+    /// entry, so later reads from it skip that work. Does nothing for URIs that
+    /// aren't archives.
+    pub async fn open_archive_async(&self, uri: &UriAbsoluteStr) -> Result<(), Error> {
+        Self::validate_uri(uri)?;
+        let Some((archive_path, _)) = Self::split_archive_parts(uri.as_str()) else {
+            return Ok(());
+        };
+        let reader = self.get_reader_async(&archive_path).await?;
+        self.get_archive_index_async(&archive_path, reader).await?;
+        Ok(())
+    }
+
     // TODO: Probably keep some other context for a user of this to know if they are in a zip/.3tz/allowing .3tz
     pub async fn read_async(&self, uri: &UriAbsoluteStr) -> Result<Bytes, Error> {
         let entry = self.read_entry_async(uri).await?;
