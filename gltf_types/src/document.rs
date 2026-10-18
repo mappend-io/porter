@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    Accessor, Animation, Asset, Buffer, BufferView, Camera, Image, Material, Mesh, Node, Sampler,
+    Scene, SceneIndex, Texture,
+};
 use serde::{Deserialize, Serialize};
 use validator::{Validate, ValidationError};
 

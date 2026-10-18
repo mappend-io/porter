@@ -2,7 +2,7 @@ use crate::app_state::AppState;
 use crate::content_encoding::entry_response;
 use crate::inline_owt_referenced_models;
 use crate::tiles3d;
-use crate::utils::*;
+use crate::utils::{get_content_root_tileset, read_error_status, sniff_content_type};
 use anyhow::Result;
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};

@@ -1,4 +1,4 @@
-use super::*;
+use super::TextureIndex;
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 

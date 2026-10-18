@@ -1,4 +1,4 @@
-use crate::utils::*;
+use crate::utils::is_model_glb;
 use anyhow::{Context, Result};
 use iri_string::types::UriAbsoluteStr;
 

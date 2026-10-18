@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    Attribute, Document, Image, ImageSource, Material, Mesh, Node, NormalTextureInfo,
+    OcclusionTextureInfo, PbrMetallicRoughness, Primitive, Sampler, Scene, Texture, TextureInfo,
+    Transform,
+};
 use anyhow::{Context, Result, anyhow};
 use bytes::{BufMut, BytesMut};
 use std::cell::RefCell;

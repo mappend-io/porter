@@ -20,7 +20,9 @@ use metrics::counter;
 use s2::cellid::CellID;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use transforms::combine_referenced_models::*;
+use transforms::combine_referenced_models::{
+    ReferencedModel, ReferencedModelInstance, combine_referenced_models,
+};
 
 pub const NAME: &str = "inline_owt_referenced_models";
 

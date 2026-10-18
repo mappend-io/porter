@@ -1,4 +1,7 @@
-use super::*;
+use super::{
+    AlphaMode, TextureIndex, TextureInfo, default_alpha_cutoff, default_alpha_mode,
+    default_emissive_factor,
+};
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use validator::Validate;

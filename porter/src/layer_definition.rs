@@ -1,5 +1,8 @@
 use crate::inline_owt_referenced_models;
-use crate::s2_utils::*;
+use crate::s2_utils::{
+    cell_id_from_face_level_col_row, face_level_col_row_from_cell_id, s2_rect_to_region,
+    s2_token_to_s2_rect, s2_tokens_to_s2_rect,
+};
 use crate::{
     tiles3d,
     tiles3d::{Asset, Content, RootProperty, Tile},

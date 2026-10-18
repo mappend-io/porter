@@ -1,4 +1,4 @@
-use super::*;
+use super::{ImageryRasterS2, ImageryRasterWmtsSimple};
 use crate::pixel_st::PixelStTable;
 
 /// Table of pixel centers in S2 st space for `target`, to pass to

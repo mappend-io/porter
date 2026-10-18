@@ -1,5 +1,5 @@
 use super::utils;
-use super::*;
+use super::{BufferViewIndex, ComponentType, Type};
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use validator::{Validate, ValidationError};

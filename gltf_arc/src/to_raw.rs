@@ -1,4 +1,8 @@
-use crate::*;
+use crate::{
+    Attribute, Document, Image, ImageSource, Material, Mesh, Node, NormalTextureInfo,
+    OcclusionTextureInfo, PbrMetallicRoughness, Primitive, Sampler, Scene, Texture, TextureInfo,
+    Transform,
+};
 use anyhow::{Result, bail};
 use bytes::{Bytes, BytesMut};
 use std::collections::{BTreeMap, HashMap};

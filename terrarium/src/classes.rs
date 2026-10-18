@@ -2,7 +2,16 @@
 //! They're warped like imagery, but with nearest sampling since IDs can't be
 //! blended, and colored from a palette when encoded.
 
-use super::*;
+use anyhow::{Context, Result, bail};
+use bytes::{BufMut, Bytes, BytesMut};
+use futures::future::join_all;
+use tokio::task::spawn_blocking;
+
+use super::{
+    MapzenTileIndex, face_level_col_row_from_cell_id, gd_rect_to_s2_coverage,
+    mapzen_tile_to_wgs84_envelope, mapzen_zoom_to_s2_level, parse_pam_geotransform,
+    resolve_elevation_raster_uri_tokens, skip_missing_source,
+};
 use crate::pixel_st::PixelStTable;
 
 /// RGBA color for each class ID. Alpha 0 leaves the class out of the tile.

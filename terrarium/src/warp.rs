@@ -1,4 +1,4 @@
-use super::*;
+use super::{ElevationRasterMapzen, ElevationRasterS2, encode_elevation_to_mapzen_rgb};
 use crate::pixel_st::PixelStTable;
 
 /// Table of pixel centers in S2 st space for `target`, to pass to

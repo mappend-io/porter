@@ -1,5 +1,5 @@
-use crate::primitive_builder::*;
-use crate::*;
+use crate::primitive_builder::{PrimitiveBuilder, PrimitiveKey};
+use crate::{Document, Material, Mesh, Node, Primitive, Scene, Transform};
 use anyhow::Result;
 use indexmap::IndexMap;
 use std::collections::HashSet;

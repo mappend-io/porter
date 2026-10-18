@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::future::join_all;
 use tokio::task::spawn_blocking;
-use warp::*;
+use warp::{apply_elevation_warp_from_source, elevation_pixel_st_table};
 
 pub use classes::*;
 pub use geo::*;
