@@ -53,6 +53,8 @@ These are only emitted for `.glb` payloads from layers whose
 - `porter_transform_inline_owt_referenced_models_unique_models_total`: Sum of
   unique models referenced across those tiles. Divide by the tiles total to get
   the average number of unique models per tile.
+- `porter_transform_inline_owt_referenced_models_tilesets_total`: Tile JSON
+  built from source points, for layers with a `tileLevel`
 
 ## OGC API - Features
 

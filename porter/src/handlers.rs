@@ -179,6 +179,21 @@ pub async fn get_child_tileset(
         });
     }
 
+    if let Some(options) = layer_def.inline_owt_referenced_models()
+        && let Some(tileset) = inline_owt_referenced_models::tileset(
+            &app_state,
+            &layer_def,
+            options,
+            paths.face,
+            paths.level,
+            paths.col,
+            row,
+        )
+        .await?
+    {
+        return Ok(Json(tileset));
+    }
+
     let tileset = layer_def.synthesize_tileset(paths.face, paths.level, paths.col, row);
     Ok(Json(tileset))
 }
@@ -248,9 +263,15 @@ pub async fn get_content_payload(
     if let Some(options) = layer_def.inline_owt_referenced_models()
         && inline_owt_referenced_models::transforms_payload(&paths.rest)
     {
-        let bytes =
-            inline_owt_referenced_models::tile_payload(&app_state, options, root, &resolved)
-                .await?;
+        let bytes = inline_owt_referenced_models::tile_payload(
+            &app_state,
+            &layer_def,
+            options,
+            root,
+            &paths.rest,
+            &resolved,
+        )
+        .await?;
 
         let content_type = sniff_content_type(&bytes);
         let mut headers = HeaderMap::new();

@@ -37,6 +37,17 @@ locate source content. To accomplish this, several key elements are necessary:
   - `inline_owt_referenced_models`: Source tiles are GeoJSON points
     referencing models (`OWT_MDL`); each `.glb` tile is served as one model
     combining every referenced model at its point.
+    Options:
+    - `tileLevel`: Serve tiles at this S2 level instead of the source content
+      level (`sourceS2ContentMaxLevel`). Each tile holds the models whose
+      points fall in its cell, and Porter builds the tile JSON from the source
+      level down from the source points: only cells with models get a tile,
+      bounded by their points (padded 200m horizontally for model reach, and
+      by each feature's `HGT` vertically when present). Models still load at
+      the distance set by `rootGeometricError`, but only near cells that have
+      them, and each tile is smaller and arrives sooner. For example,
+      `{ "name": "inline_owt_referenced_models", "tileLevel": 14 }` splits L12
+      building tiles into up to 16 L14 tiles.
 - `elevationRasterContent`: Path to Mapzen Terrarium-encoded RGB PNG or F32 TIFF
   rasters within the content, if present. If defined, a Mapzen Terrarium
   endpoint will be exposed. The tokens `{FACE}`, `{LEVEL}`, `{COL}` and `{ROW}`

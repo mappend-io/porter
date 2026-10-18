@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 
 // TODO:
 // - Need to buffer the rects from tokens for synthesized tiles so the BVs are coherent
-const MIN_ELEV: f64 = -9000.0;
-const MAX_ELEV: f64 = 9000.0;
+pub const MIN_ELEV: f64 = -9000.0;
+pub const MAX_ELEV: f64 = 9000.0;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -306,6 +306,14 @@ impl From<ContentTransform> for ContentTransformRepr {
 }
 
 impl LayerDefinition {
+    /// Checks that need more than one field
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(options) = self.inline_owt_referenced_models() {
+            options.validate(self.source_s2_content_max_level)?;
+        }
+        Ok(())
+    }
+
     // find_map is for when there is more than one transform
     #[allow(clippy::unnecessary_find_map)]
     pub fn inline_owt_referenced_models(&self) -> Option<&inline_owt_referenced_models::Options> {

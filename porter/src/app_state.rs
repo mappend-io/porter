@@ -39,6 +39,7 @@ impl AppState {
                 // it more often than layer definition ttl.
                 let bytes = resource_loader.read_async_uncached(absolute).await?;
                 let mut def = serde_json::from_slice::<LayerDefinition>(&bytes)?;
+                def.validate().map_err(anyhow::Error::msg)?;
                 def.id = id_owned;
                 Ok::<_, anyhow::Error>(Arc::new(def))
             })
