@@ -62,9 +62,15 @@ fn interpolate_cubic(v0: f32, v1: f32, v2: f32, v3: f32, f: f32) -> f32 {
     a * f3 + b * f2 + c * f + d
 }
 
+/// Sample at continuous pixel coordinates, where pixel (i, j) covers
+/// [i, i + 1) x [j, j + 1) and its value sits at its center
 pub fn sample_bicubic(source: &ImageryRasterS2, x: f64, y: f64) -> glam::U8Vec3 {
     let w = source.pixel_dims.x;
     let h = source.pixel_dims.y;
+
+    // Interpolate between pixel centers
+    let x = x - 0.5;
+    let y = y - 0.5;
     let x_int = x.floor() as i32;
     let y_int = y.floor() as i32;
     let dx = (x - x_int as f64) as f32;
@@ -107,4 +113,33 @@ pub fn sample_bicubic(source: &ImageryRasterS2, x: f64, y: f64) -> glam::U8Vec3 
     }
 
     glam::u8vec3(rgb[0], rgb[1], rgb[2])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn samples_pixel_values_at_their_centers() {
+        // Red = 10x + 40y, a ramp the cubic reproduces exactly
+        let source = ImageryRasterS2 {
+            face: 0,
+            pixel_level: 0,
+            origin_s: 0.0,
+            origin_t: 1.0,
+            resolution_s: 0.25,
+            resolution_t: -0.25,
+            pixel_dims: glam::ivec2(4, 4),
+            data: (0..16u8)
+                .map(|i| glam::u8vec3(10 * (i % 4) + 40 * (i / 4), 0, 255))
+                .collect(),
+        };
+        let red = |x, y| sample_bicubic(&source, x, y).x;
+        assert_eq!(red(1.5, 2.5), 90);
+        assert_eq!(red(2.0, 2.5), 95);
+        assert_eq!(red(1.5, 2.0), 70);
+        assert_eq!(red(0.5, 0.5), 0);
+        assert_eq!(red(3.5, 3.5), 150);
+        assert_eq!(sample_bicubic(&source, 2.0, 2.0).z, 255);
+    }
 }
