@@ -411,7 +411,16 @@ function setClassRaster(name) {
             tileSize: 256,
             maxzoom: 16,
         });
-        map.addLayer({ id: "classes", type: "raster", source: "classes" }, "hillshade");
+        // Blending class colors would make colors no class has
+        map.addLayer(
+            {
+                id: "classes",
+                type: "raster",
+                source: "classes",
+                paint: { "raster-resampling": "nearest" },
+            },
+            "hillshade",
+        );
     }
     updateURL();
 }
