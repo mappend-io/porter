@@ -115,6 +115,27 @@ from interfering.
 http://localhost:3200/?layers=my-layer,my-other-layer&noglobe
 ```
 
+Add `lulc` to show land cover instead of imagery on terrain whose glTF carries
+it, as an `EXT_mesh_features` feature ID texture with a `color` property per
+class (like OWT terrain's `owt_lulc`). It uses CesiumJS styling, with colors
+from each tile's own property table:
+
+```text
+http://localhost:3200/?layers=my-layer&noglobe&lulc
+```
+
+The same in your own CesiumJS:
+
+```js
+tileset.style = new Cesium.Cesium3DTileStyle({
+    color: "rgb(${color}[0], ${color}[1], ${color}[2])",
+});
+tileset.colorBlendMode = Cesium.Cesium3DTileColorBlendMode.REPLACE;
+```
+
+CesiumJS downloads the land cover texture of each terrain tile whether or not
+it's shown.
+
 ## Bundled MaplibreGL JS viewer for Mapzen Terrarium/WMTS imagery tiles
 
 Porter includes a bundled MaplibreGL environment. Elevation and imagery data may be
@@ -123,3 +144,6 @@ previewed using the URL format:
 ```text
 http://localhost:3200/terrarium_viewer/my-layer
 ```
+
+The layer's class rasters, if any, can be drawn over the base layer from the
+Classes menu, or with `classes=<name>` in the URL.

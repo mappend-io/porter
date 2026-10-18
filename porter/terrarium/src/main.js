@@ -19,6 +19,7 @@ function getInitialView() {
         baseLayer: params.get("baseLayer") || "imagery",
         hillshade: params.has("hillshade") ? params.get("hillshade") === "true" : true,
         grid: params.get("grid") === "true",
+        classRaster: params.get("classes") || "none",
     };
 }
 
@@ -125,6 +126,11 @@ function updateURL() {
     } else {
         params.delete("grid");
     }
+    if (currentClassRaster === "none") {
+        params.delete("classes");
+    } else {
+        params.set("classes", currentClassRaster);
+    }
     globalThis.history.replaceState(
         null,
         "",
@@ -138,6 +144,7 @@ let currentFeatureUrl = null;
 let currentBaseLayer = initial.baseLayer;
 let hillshadeVisible = initial.hillshade;
 let gridVisible = initial.grid;
+let currentClassRaster = initial.classRaster;
 
 const map = new maplibregl.Map({
     container: "map",
@@ -380,6 +387,35 @@ function setBaseLayer(name) {
     updateURL();
 }
 
+// Class rasters (like land cover) from /layers, drawn over the base layer
+const classRasterUris = new Map();
+
+let mapLoaded = false;
+map.once("load", () => {
+    mapLoaded = true;
+});
+
+function setClassRaster(name) {
+    if (!mapLoaded) {
+        map.once("load", () => setClassRaster(name));
+        return;
+    }
+    currentClassRaster = name;
+    if (map.getLayer("classes")) map.removeLayer("classes");
+    if (map.getSource("classes")) map.removeSource("classes");
+    const uri = classRasterUris.get(name);
+    if (uri) {
+        map.addSource("classes", {
+            type: "raster",
+            tiles: [`${uri}/{z}/{x}/{y}.png`],
+            tileSize: 256,
+            maxzoom: 16,
+        });
+        map.addLayer({ id: "classes", type: "raster", source: "classes" }, "hillshade");
+    }
+    updateURL();
+}
+
 function toggleHillshade() {
     hillshadeVisible = !hillshadeVisible;
     const next = hillshadeVisible ? "visible" : "none";
@@ -424,6 +460,12 @@ controls.innerHTML = `
   <div id="feature-layer-control" style="display: flex; align-items: center; gap: 4px; margin-top: 5px;">
     <label style="width: 80px;">Features</label>
     <select id="feature-layer-select" style="flex-grow: 1; padding: 4px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px;">
+    </select>
+  </div>
+  <div id="class-raster-control" style="display: flex; align-items: center; gap: 4px; margin-top: 5px;">
+    <label style="width: 80px;">Classes</label>
+    <select id="class-raster-select" style="flex-grow: 1; padding: 4px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px;">
+      <option value="none">None</option>
     </select>
   </div>
 `;
@@ -509,6 +551,24 @@ try {
             select.appendChild(opt);
         }
     }
+
+    const classSelect = document.getElementById("class-raster-select");
+    const thisLayer = layers.items.find((layer) => layer.id === id);
+    for (const endpoint of thisLayer?.endpoints ?? []) {
+        if (endpoint.type !== "classes_wmts_simple_png") continue;
+        classRasterUris.set(endpoint.name, endpoint.uri);
+        const opt = document.createElement("option");
+        opt.value = endpoint.name;
+        opt.textContent = endpoint.name;
+        classSelect.appendChild(opt);
+    }
+    if (classRasterUris.has(currentClassRaster)) {
+        classSelect.value = currentClassRaster;
+        setClassRaster(currentClassRaster);
+    } else {
+        currentClassRaster = "none";
+    }
+    classSelect.addEventListener("change", (e) => setClassRaster(e.target.value));
 
     if (currentFeatureLayer !== "none" && !currentFeatureUrl) {
         currentFeatureLayer = "none";

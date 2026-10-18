@@ -14,6 +14,8 @@ import {
     ScreenSpaceEventHandler,
     ScreenSpaceEventType,
     DirectionalLight,
+    Cesium3DTileStyle,
+    Cesium3DTileColorBlendMode,
 } from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import "./style.css";
@@ -192,9 +194,27 @@ handler.setInputAction((movement) => {
     }
 }, ScreenSpaceEventType.MOUSE_MOVE);
 
+// With ?lulc, show land cover instead of imagery on tilesets whose features
+// carry a class color (the terrain's EXT_mesh_features LULC texture, with
+// colors from each tile's property table)
+const lulcStyle = new Cesium3DTileStyle({
+    color: "rgb(${color}[0], ${color}[1], ${color}[2])",
+});
+
+function styleLulcOnceDetected(tileset) {
+    const removeListener = tileset.tileLoad.addEventListener((tile) => {
+        const content = tile.content;
+        if (!(content.featuresLength > 0) || !content.getFeature(0).hasProperty("color")) return;
+        removeListener();
+        tileset.style = lulcStyle;
+        tileset.colorBlendMode = Cesium3DTileColorBlendMode.REPLACE;
+    });
+}
+
 async function loadLayer(name) {
     const tileset = await Cesium3DTileset.fromUrl(`/${name}`);
     tileset.cacheBytes = 1024 * (1 << 20);
+    if (params.has("lulc")) styleLulcOnceDetected(tileset);
     viewer.scene.primitives.add(tileset);
     return tileset;
 }
