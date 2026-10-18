@@ -55,9 +55,14 @@ decompressed, and compressed again if the client accepts another encoding.
 
 Tile, content and raster responses are addressed by layer hash, so successful
 ones are sent with `Cache-Control: public, max-age=31536000, immutable`. Layer
-lists and root tilesets use `public, max-age=24`. Error responses are always
-sent with `Cache-Control: no-store`, so a failed source read is retried rather
-than cached by clients or CDNs.
+lists and root tilesets use `public, max-age=24`. Missing data (404) is cached
+for a minute, so clients and CDNs asking again for an area without data don't
+send Porter back to the source each time. Other error responses are sent with
+`Cache-Control: no-store`, so a failed source read is retried rather than
+cached.
+
+The viewers' static files are cached too: files with a hash in their name are
+immutable, the rest carry an `ETag` and revalidate.
 
 Porter tells missing source data apart from failed reads. Missing data is a
 404 for content, and an empty tile or tileset where Porter generates the tile

@@ -1,6 +1,6 @@
 use axum::body::Body;
 use axum::http::header::CACHE_CONTROL;
-use axum::http::{HeaderValue, Request};
+use axum::http::{HeaderValue, Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
@@ -16,13 +16,15 @@ pub async fn cache_forever(req: Request<Body>, next: Next) -> impl IntoResponse 
     res
 }
 
-// Only successful responses are cacheable: errors can come from transient
-// source failures, and must not stick in clients or CDNs
+// Only successful responses are cacheable for long. Missing data is a real
+// answer, cached briefly so repeated requests for an area without data don't
+// each go back to the source. Other errors can come from transient source
+// failures, and must not stick in clients or CDNs.
 fn set_cache_control(res: &mut Response, cacheable: &'static str) {
-    let value = if res.status().is_success() {
-        cacheable
-    } else {
-        "no-store"
+    let value = match res.status() {
+        status if status.is_success() => cacheable,
+        StatusCode::NOT_FOUND => "public, max-age=60",
+        _ => "no-store",
     };
     res.headers_mut()
         .insert(CACHE_CONTROL, HeaderValue::from_static(value));
@@ -63,7 +65,6 @@ pub async fn security_headers(req: Request<Body>, next: Next) -> impl IntoRespon
 mod tests {
     use super::*;
     use axum::Router;
-    use axum::http::StatusCode;
     use axum::middleware::from_fn;
     use axum::routing::get;
     use tower::ServiceExt;
@@ -83,12 +84,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn only_successful_responses_are_cached() {
+    async fn only_successful_responses_are_cached_for_long() {
         assert_eq!(
             cache_control("/ok").await,
             "public, max-age=31536000, immutable"
         );
-        assert_eq!(cache_control("/missing").await, "no-store");
+        assert_eq!(cache_control("/missing").await, "public, max-age=60");
         assert_eq!(cache_control("/failed").await, "no-store");
     }
 }
