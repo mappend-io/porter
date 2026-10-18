@@ -4,9 +4,11 @@ use futures::future::join_all;
 use tokio::task::spawn_blocking;
 use warp::*;
 
+pub use classes::*;
 pub use geo::*;
 pub use utils::*;
 
+mod classes;
 mod geo;
 mod pixel_st;
 mod utils;

@@ -15,6 +15,9 @@ use serde::{Deserialize, Serialize};
 pub struct LayerItemEndpoint {
     r#type: String,
     uri: String,
+    // Tells apart endpoints of the same type, like a layer's class rasters
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -46,6 +49,7 @@ pub async fn get_layers(
             let mut endpoints = vec![];
 
             endpoints.push(LayerItemEndpoint {
+                name: None,
                 r#type: "3d_tiles".to_string(),
                 uri: UriRelativeStr::new(&layer.id)
                     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -55,6 +59,7 @@ pub async fn get_layers(
 
             if layer.elevation_raster_content.is_some() {
                 endpoints.push(LayerItemEndpoint {
+                    name: None,
                     r#type: "elevation_mapzen_terrarium_rgb_png".to_string(),
                     uri: UriRelativeStr::new(&format!("terrarium/{}", layer.id,))
                         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -65,6 +70,7 @@ pub async fn get_layers(
 
             if layer.imagery_raster_content.is_some() {
                 endpoints.push(LayerItemEndpoint {
+                    name: None,
                     r#type: "imagery_wmts_simple_jpg".to_string(),
                     uri: UriRelativeStr::new(&format!("wmts/{}", layer.id,))
                         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -73,8 +79,23 @@ pub async fn get_layers(
                 });
             }
 
+            for name in layer.class_rasters.keys() {
+                let hash = layer
+                    .class_raster_hash(name)
+                    .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+                endpoints.push(LayerItemEndpoint {
+                    name: Some(name.clone()),
+                    r#type: "classes_wmts_simple_png".to_string(),
+                    uri: UriRelativeStr::new(&format!("wmts/{}/{name}/{hash}", layer.id))
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+                        .resolve_against(base_uri)
+                        .to_string(),
+                });
+            }
+
             if layer.source_s2_content_extension == "geojson" {
                 endpoints.push(LayerItemEndpoint {
+                    name: None,
                     r#type: "ogc_api_features".to_string(),
                     uri: UriRelativeStr::new(&format!("features/collections/{}/items", layer.id,))
                         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -481,6 +502,74 @@ pub async fn get_wmts_simple_imagery(
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
 
     counter!("porter_wmts_simple_tiles_total", "zoom_level" => paths.zoom.to_string()).increment(1);
+
+    Ok((headers, bytes))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetWmtsClassTilePaths {
+    pub id: String,
+    pub name: String,
+    // Busts caches when the colors or source change, like the 3D Tiles hash.
+    // Not checked.
+    pub hash: String,
+    pub zoom: i32,
+    pub x: i32,
+    pub y: String,
+}
+
+pub async fn get_wmts_class_tile(
+    State(app_state): State<AppState>,
+    Path(paths): Path<GetWmtsClassTilePaths>,
+) -> Result<impl IntoResponse, StatusCode> {
+    let actual_y: i32 = paths
+        .y
+        .strip_suffix(".png")
+        .ok_or(StatusCode::NOT_FOUND)?
+        .parse()
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    let layer_def = app_state
+        .get_layer_definition(&paths.id)
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    let class_raster = layer_def
+        .class_rasters
+        .get(&paths.name)
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    // HACK: Like imagery, this only works for a .3tz
+    let raster_png_uri = format!(
+        "{}/{}",
+        layer_def.source_uri_content_template, class_raster.content
+    );
+    let fallback_raster_png_uri = layer_def
+        .base_globe_terrain_uri
+        .as_ref()
+        .map(|uri| format!("{uri}/{}", class_raster.content));
+
+    let index = terrarium::MapzenTileIndex {
+        zoom: paths.zoom,
+        col: paths.x,
+        row: actual_y,
+    };
+
+    let bytes = terrarium::build_simple_wmts_class_tile(
+        app_state.resource_loader.clone(),
+        &raster_png_uri,
+        fallback_raster_png_uri,
+        layer_def.source_s2_content_package_level,
+        &index,
+        &class_raster.palette(),
+    )
+    .await
+    .map_err(raster_error_status)?;
+
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/png"));
+
+    counter!("porter_wmts_class_tiles_total", "zoom_level" => paths.zoom.to_string()).increment(1);
 
     Ok((headers, bytes))
 }

@@ -56,6 +56,34 @@ locate source content. To accomplish this, several key elements are necessary:
   defined, a WMTS Simple endpoint will be exposed. The tokens `{FACE}`, `{LEVEL}`, `{COL}` and
   `{ROW}` will be substituted. Example:
   `imagery/{FACE}/{LEVEL}/{COL}/{ROW}.jpg`.
+- `classRasters`: Rasters of 8-bit class IDs within the content, like land use
+  and land cover, by name. Each is exposed as its own WMTS Simple endpoint of
+  PNG tiles colored by class, so one source can be served with different
+  colors for different consumers. Each entry has:
+  - `content`: Path to 8-bit grayscale PNG rasters with `.aux.xml` sidecars,
+    with the same tokens as `imageryRasterContent`. Example:
+    `lulc/{FACE}/{LEVEL}/{COL}/{ROW}.png`.
+  - `colors`: Class ID to `#rrggbb` or `#rrggbbaa`. Classes without a color,
+    and areas without source data, are transparent.
+
+  Tiles are served at `wmts/{id}/{name}/{hash}/{z}/{x}/{y}.png`, listed in
+  `/layers`. The hash changes with the colors or the layer's source, so edits
+  reach clients despite the long-lived cache headers. Class rasters are left out
+  of the 3D Tiles hash, so editing them keeps cached 3D Tiles valid. Example,
+  with two of the OWT `owt_lulc` classes:
+
+  ```json
+  "classRasters": {
+      "water": {
+          "content": "lulc/{FACE}/{LEVEL}/{COL}/{ROW}.png",
+          "colors": { "80": "#0064c8", "81": "#00c8ff80" }
+      }
+  }
+  ```
+
+  CesiumJS doesn't need this to show land cover on the 3D terrain: the terrain
+  glTF already carries it (see the bundled viewer's `lulc` option in
+  [Usage](/guide/usage)).
 
 The remaining fields can be set as described in the sample below and are
 reserved for future use.

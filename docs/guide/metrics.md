@@ -42,6 +42,8 @@ these metrics.
   labeled by `zoom_level`. Empty fallback tiles are counted too.
 - `porter_wmts_simple_tiles_total`: WMTS Simple imagery tiles served, labeled
   by `zoom_level`. Empty fallback tiles are counted too.
+- `porter_wmts_class_tiles_total`: WMTS Simple class raster tiles served,
+  labeled by `zoom_level`. Empty fallback tiles are counted too.
 
 ## Content transforms
 

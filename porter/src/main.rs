@@ -136,6 +136,10 @@ async fn main() -> Result<()> {
         )
         .route("/terrarium/{id}/{zoom}/{x}/{y}", get(get_terrarium_tile))
         .route("/wmts/{id}/{zoom}/{x}/{y}", get(get_wmts_simple_imagery))
+        .route(
+            "/wmts/{id}/{name}/{hash}/{zoom}/{x}/{y}",
+            get(get_wmts_class_tile),
+        )
         .route_layer(from_fn(cache_forever));
 
     let ogc_features_routes = Router::new()

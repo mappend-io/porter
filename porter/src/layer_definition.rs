@@ -46,6 +46,11 @@ pub struct LayerDefinition {
     // Like: `imagery/{FACE}/{LEVEL}/{COL}/{ROW}.jpg`
     #[serde(default)]
     pub imagery_raster_content: Option<String>,
+
+    // Rasters of class IDs by name, each served over WMTS with its own colors.
+    // Not part of the 3D Tiles hash.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub class_rasters: BTreeMap<String, ClassRaster>,
 }
 
 impl LayerDefinition {
@@ -74,8 +79,22 @@ impl LayerDefinition {
     pub fn hash(&self) -> String {
         // TODO: This is fragile if metadata fields are populated using any hashmap values.
         // Revisit this: canonicalize it somehow before hashing.
-        let json = serde_json::to_vec(self).expect("Serialization for hash failed");
+        // Class rasters don't change 3D Tiles responses, so editing their colors
+        // keeps 3D Tiles cached. They have their own hash.
+        let tiles_only = LayerDefinition {
+            class_rasters: BTreeMap::new(),
+            ..self.clone()
+        };
+        let json = serde_json::to_vec(&tiles_only).expect("Serialization for hash failed");
         blake3::hash(&json).to_hex()[..16].to_string()
+    }
+
+    /// Hash for a class raster's tile URLs: changes with its source or colors
+    pub fn class_raster_hash(&self, name: &str) -> Option<String> {
+        let class_raster = self.class_rasters.get(name)?;
+        let json = serde_json::to_vec(&(self.hash(), name, class_raster))
+            .expect("Serialization for hash failed");
+        Some(blake3::hash(&json).to_hex()[..16].to_string())
     }
 
     pub fn coverage_cell_union(&self) -> s2::cellunion::CellUnion {
@@ -305,11 +324,73 @@ impl From<ContentTransform> for ContentTransformRepr {
     }
 }
 
+/// A raster of 8-bit class IDs, like land use and land cover, served over WMTS
+/// as a PNG colored by class: `{ "content": "lulc/{FACE}/{LEVEL}/{COL}/{ROW}.png",
+/// "colors": { "10": "#006400", "80": "#0064c8cc" } }`. Classes without a color
+/// are transparent.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClassRaster {
+    pub content: String,
+    pub colors: BTreeMap<u8, ClassColor>,
+}
+
+impl ClassRaster {
+    pub fn palette(&self) -> terrarium::ClassColors {
+        let mut palette = [[0; 4]; 256];
+        for (&class, color) in &self.colors {
+            palette[class as usize] = color.0;
+        }
+        palette
+    }
+}
+
+/// RGBA, written `#rrggbb` or `#rrggbbaa`
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct ClassColor(pub [u8; 4]);
+
+impl TryFrom<String> for ClassColor {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        let hex = s
+            .strip_prefix('#')
+            .filter(|hex| hex.len() == 6 || hex.len() == 8)
+            .filter(|hex| hex.chars().all(|c| c.is_ascii_hexdigit()))
+            .ok_or_else(|| format!("Color {s} is not #rrggbb or #rrggbbaa"))?;
+        let mut rgba = [255; 4];
+        for (i, channel) in rgba.iter_mut().take(hex.len() / 2).enumerate() {
+            *channel = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16)
+                .map_err(|_| format!("Color {s} is not #rrggbb or #rrggbbaa"))?;
+        }
+        Ok(Self(rgba))
+    }
+}
+
+impl From<ClassColor> for String {
+    fn from(ClassColor([r, g, b, a]): ClassColor) -> Self {
+        if a == 255 {
+            format!("#{r:02x}{g:02x}{b:02x}")
+        } else {
+            format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
+        }
+    }
+}
+
 impl LayerDefinition {
     /// Checks that need more than one field
     pub fn validate(&self) -> Result<(), String> {
         if let Some(options) = self.inline_owt_referenced_models() {
             options.validate(self.source_s2_content_max_level)?;
+        }
+        for name in self.class_rasters.keys() {
+            let url_safe = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+            if name.is_empty() || !name.chars().all(url_safe) {
+                return Err(format!(
+                    "Class raster name {name:?} must be letters, digits, _ or -"
+                ));
+            }
         }
         Ok(())
     }
@@ -351,5 +432,75 @@ mod tests {
 
         assert!(parse(r#"["no_such_transform"]"#).is_err());
         assert!(parse(r#"[{"name": "inline_owt_referenced_models", "typo": 1}]"#).is_err());
+    }
+
+    #[test]
+    fn class_raster_colors_parse_and_round_trip() {
+        let parse = |json: &str| serde_json::from_str::<ClassRaster>(json);
+
+        let raster =
+            parse(r##"{"content": "lulc.png", "colors": {"10": "#006400", "80": "#0064C8cc"}}"##)
+                .unwrap();
+        let palette = raster.palette();
+        assert_eq!(palette[10], [0, 100, 0, 255]);
+        assert_eq!(palette[80], [0, 100, 200, 204]);
+        assert_eq!(palette[0], [0, 0, 0, 0]);
+        assert_eq!(
+            serde_json::to_string(&raster).unwrap(),
+            r##"{"content":"lulc.png","colors":{"10":"#006400","80":"#0064c8cc"}}"##
+        );
+
+        assert!(parse(r##"{"content": "x", "colors": {"256": "#000000"}}"##).is_err());
+        assert!(parse(r##"{"content": "x", "colors": {"1": "000000"}}"##).is_err());
+        assert!(parse(r##"{"content": "x", "colors": {"1": "#00000"}}"##).is_err());
+        assert!(parse(r##"{"content": "x", "colors": {"1": "#gg0000"}}"##).is_err());
+        assert!(parse(r##"{"content": "x", "colors": {"1": "#+f0000"}}"##).is_err());
+        assert!(parse(r##"{"content": "x", "colors": {}, "typo": 1}"##).is_err());
+    }
+
+    #[test]
+    fn class_rasters_have_their_own_hash() {
+        let mut layer: LayerDefinition = serde_json::from_value(serde_json::json!({
+            "sourceUriContentTemplate": "s3://bucket/{CONTENT_ROOT_TOKEN}/terrain.3tz",
+            "sourceS2ContentPackageLevel": 7,
+            "sourceS2ContentMinLevel": 7,
+            "sourceS2ContentMaxLevel": 12,
+            "sourceS2ContentExtension": "glb",
+            "sourceS2ContentCoverageTokens": ["1"],
+            "rootGeometricError": 131072,
+            "tilesetRootProperty": {},
+            "tilesetExtensionsUsed": [],
+            "tilesetExtensionsRequired": [],
+            "version": 0,
+            "assetId": 1,
+        }))
+        .unwrap();
+        let tiles_hash = layer.hash();
+        assert_eq!(layer.class_raster_hash("lulc"), None);
+
+        let raster = |color: &str| ClassRaster {
+            content: "lulc/{FACE}/{LEVEL}/{COL}/{ROW}.png".to_string(),
+            colors: BTreeMap::from([(10, ClassColor::try_from(color.to_string()).unwrap())]),
+        };
+        layer
+            .class_rasters
+            .insert("lulc".to_string(), raster("#006400"));
+        let lulc_hash = layer.class_raster_hash("lulc").unwrap();
+        assert_eq!(layer.hash(), tiles_hash);
+
+        layer
+            .class_rasters
+            .insert("lulc".to_string(), raster("#00ff00"));
+        assert_ne!(layer.class_raster_hash("lulc").unwrap(), lulc_hash);
+        assert_eq!(layer.hash(), tiles_hash);
+
+        layer.version = 1;
+        assert_ne!(layer.hash(), tiles_hash);
+        assert_ne!(layer.class_raster_hash("lulc").unwrap(), lulc_hash);
+
+        layer
+            .class_rasters
+            .insert("lulc/x".to_string(), raster("#00ff00"));
+        assert!(layer.validate().is_err());
     }
 }
