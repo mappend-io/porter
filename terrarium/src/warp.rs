@@ -49,7 +49,7 @@ pub fn apply_elevation_warp_from_source(
 ///
 /// v0, v1, v2, v3 are the four points, f is the fraction [0, 1] between v1 and v2
 #[inline]
-fn interpolate_cubic(v0: f32, v1: f32, v2: f32, v3: f32, f: f32) -> f32 {
+pub(crate) fn interpolate_cubic(v0: f32, v1: f32, v2: f32, v3: f32, f: f32) -> f32 {
     let f2 = f * f;
     let f3 = f2 * f;
 

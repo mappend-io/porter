@@ -1,5 +1,6 @@
 use super::{ImageryRasterS2, ImageryRasterWmtsSimple};
 use crate::pixel_st::PixelStTable;
+use crate::warp::interpolate_cubic;
 
 /// Table of pixel centers in S2 st space for `target`, to pass to
 /// [`apply_imagery_warp_from_source`] for each source raster
@@ -43,23 +44,6 @@ pub fn apply_imagery_warp_from_source(
             target.data[i] = sample_bicubic(source, sx_float, sy_float);
         }
     }
-}
-
-/// Catmull-Rom cubic interpolation kernel
-///
-/// v0, v1, v2, v3 are the four points, f is the fraction [0, 1] between v1 and v2
-#[inline]
-fn interpolate_cubic(v0: f32, v1: f32, v2: f32, v3: f32, f: f32) -> f32 {
-    let f2 = f * f;
-    let f3 = f2 * f;
-
-    // Catmull-Rom coefficients
-    let a = -0.5 * v0 + 1.5 * v1 - 1.5 * v2 + 0.5 * v3;
-    let b = v0 - 2.5 * v1 + 2.0 * v2 - 0.5 * v3;
-    let c = -0.5 * v0 + 0.5 * v2;
-    let d = v1;
-
-    a * f3 + b * f2 + c * f + d
 }
 
 /// Sample at continuous pixel coordinates, where pixel (i, j) covers

@@ -30,31 +30,6 @@ pub struct S3RangeReader {
 }
 
 impl S3RangeReader {
-    pub async fn new(client: Client, bucket: String, key: String) -> Result<Self, Error> {
-        let head_output = client
-            .head_object()
-            .bucket(&bucket)
-            .key(&key)
-            .send()
-            .await
-            .map_err(|e| s3_error("HeadObject", e))?;
-
-        let size = head_output.content_length().unwrap_or(0) as u64;
-
-        if size == 0 {
-            return Err(Error::Io(std::io::Error::other(
-                "S3 object is empty or missing content-length",
-            )));
-        }
-
-        Ok(Self {
-            client,
-            bucket,
-            key,
-            size,
-        })
-    }
-
     /// Open an object with a single suffix-range GET instead of a HeadObject:
     /// the response carries the object's size, and the last `tail_len` bytes
     /// come along for free. Archives are read from the end first, so this

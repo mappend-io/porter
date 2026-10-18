@@ -94,7 +94,6 @@ pub fn gd_rect_to_s2_coverage(gd_rect: &Wgs84Rect2d, s2_level: i32) -> Vec<s2::c
     cell_union.0
 }
 
-// TODO: Duplicated from s2_utils
 pub fn face_level_col_row_from_cell_id(cell_id: s2::cellid::CellID) -> (u8, i32, i32, i32) {
     let face = cell_id.face();
     let level = cell_id.level();
@@ -104,11 +103,6 @@ pub fn face_level_col_row_from_cell_id(cell_id: s2::cellid::CellID) -> (u8, i32,
     let row = (j as u64) >> (30 - level);
 
     (face, level as i32, col as i32, row as i32)
-}
-
-pub fn hae_to_msl(val: f32) -> f32 {
-    // TODO
-    val
 }
 
 #[cfg(test)]

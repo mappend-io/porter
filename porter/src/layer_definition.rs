@@ -58,8 +58,7 @@ pub struct LayerDefinition {
 
 impl LayerDefinition {
     pub fn geometric_error_for_level(&self, level: i32) -> f64 {
-        let scale = 1.0;
-        (self.root_geometric_error / 2f64.powi(level.max(0))) * scale
+        self.root_geometric_error / 2f64.powi(level.max(0))
     }
 
     pub fn resolve_content_uri_template(&self, content_root_token: &str) -> String {

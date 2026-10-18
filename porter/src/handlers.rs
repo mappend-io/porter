@@ -106,7 +106,7 @@ pub async fn get_layers(
 
             Ok(LayerItem {
                 id: layer.id.clone(),
-                description: layer.description.clone().unwrap_or("".to_string()),
+                description: layer.description.clone().unwrap_or_default(),
                 endpoints,
             })
         })
@@ -452,7 +452,7 @@ pub struct GetWmtsSimpleImageryPaths {
 
 pub async fn get_wmts_simple_imagery(
     State(app_state): State<AppState>,
-    Path(paths): Path<GetTerrariumTilePaths>,
+    Path(paths): Path<GetWmtsSimpleImageryPaths>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let actual_y: i32 = paths
         .y

@@ -21,16 +21,7 @@ pub fn cell_id_from_face_level_col_row(
     leaf_id.parent(level as u64)
 }
 
-pub fn face_level_col_row_from_cell_id(cell_id: s2::cellid::CellID) -> (u8, i32, i32, i32) {
-    let face = cell_id.face();
-    let level = cell_id.level();
-
-    let (_, i, j, _orientation) = cell_id.face_ij_orientation();
-    let col = (i as u64) >> (30 - level);
-    let row = (j as u64) >> (30 - level);
-
-    (face, level as i32, col as i32, row as i32)
-}
+pub use terrarium::face_level_col_row_from_cell_id;
 
 pub fn s2_rect_to_region(
     rect: &s2::rect::Rect,
