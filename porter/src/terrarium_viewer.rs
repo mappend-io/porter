@@ -1,7 +1,7 @@
+use crate::viewer::embedded_response;
 use axum::{
-    body::Body,
     extract::Path,
-    http::{StatusCode, header},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use rust_embed::RustEmbed;
@@ -10,25 +10,20 @@ use rust_embed::RustEmbed;
 #[folder = "terrarium/dist/"]
 struct TerrariumViewer;
 
-pub async fn index_handler() -> impl IntoResponse {
-    serve_file("index.html", "text/html")
+pub async fn index_handler(request_headers: HeaderMap) -> impl IntoResponse {
+    serve_file("index.html", &request_headers)
 }
 
-pub async fn asset_handler(Path(path): Path<String>) -> impl IntoResponse {
-    serve_file(
-        &format!("assets/{path}"),
-        mime_guess::from_path(&path)
-            .first_or_octet_stream()
-            .as_ref(),
-    )
+pub async fn asset_handler(
+    Path(path): Path<String>,
+    request_headers: HeaderMap,
+) -> impl IntoResponse {
+    serve_file(&format!("assets/{path}"), &request_headers)
 }
 
-fn serve_file(path: &str, mime: &str) -> Response {
+fn serve_file(path: &str, request_headers: &HeaderMap) -> Response {
     match TerrariumViewer::get(path) {
-        Some(content) => Response::builder()
-            .header(header::CONTENT_TYPE, mime)
-            .body(Body::from(content.data.into_owned()))
-            .unwrap(),
+        Some(file) => embedded_response(path, file, request_headers),
         None => (StatusCode::NOT_FOUND, "Not found").into_response(),
     }
 }
