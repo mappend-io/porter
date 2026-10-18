@@ -19,7 +19,6 @@ function getInitialView() {
         baseLayer: params.get("baseLayer") || "imagery",
         hillshade: params.has("hillshade") ? params.get("hillshade") === "true" : true,
         grid: params.get("grid") === "true",
-        classRaster: params.get("classes") || "none",
     };
 }
 
@@ -126,11 +125,6 @@ function updateURL() {
     } else {
         params.delete("grid");
     }
-    if (currentClassRaster === "none") {
-        params.delete("classes");
-    } else {
-        params.set("classes", currentClassRaster);
-    }
     globalThis.history.replaceState(
         null,
         "",
@@ -144,7 +138,6 @@ let currentFeatureUrl = null;
 let currentBaseLayer = initial.baseLayer;
 let hillshadeVisible = initial.hillshade;
 let gridVisible = initial.grid;
-let currentClassRaster = initial.classRaster;
 
 const map = new maplibregl.Map({
     container: "map",
@@ -371,6 +364,14 @@ async function refresh() {
     }
 }
 
+// Class rasters (like land cover) from /layers, also offered as base layers
+const classRasterUris = new Map();
+
+let mapLoaded = false;
+map.once("load", () => {
+    mapLoaded = true;
+});
+
 function setBaseLayer(name) {
     currentBaseLayer = name;
     const baseLayers = ["imagery", "osm"];
@@ -384,23 +385,15 @@ function setBaseLayer(name) {
     for (const btn of document.querySelectorAll("#base-toggle button")) {
         btn.classList.toggle("active", btn.dataset.layer === name);
     }
+    setClassRaster(baseLayers.includes(name) ? null : name);
     updateURL();
 }
-
-// Class rasters (like land cover) from /layers, drawn over the base layer
-const classRasterUris = new Map();
-
-let mapLoaded = false;
-map.once("load", () => {
-    mapLoaded = true;
-});
 
 function setClassRaster(name) {
     if (!mapLoaded) {
         map.once("load", () => setClassRaster(name));
         return;
     }
-    currentClassRaster = name;
     if (map.getLayer("classes")) map.removeLayer("classes");
     if (map.getSource("classes")) map.removeSource("classes");
     const uri = classRasterUris.get(name);
@@ -422,7 +415,6 @@ function setClassRaster(name) {
             "hillshade",
         );
     }
-    updateURL();
 }
 
 function toggleHillshade() {
@@ -469,12 +461,6 @@ controls.innerHTML = `
   <div id="feature-layer-control" style="display: flex; align-items: center; gap: 4px; margin-top: 5px;">
     <label style="width: 80px;">Features</label>
     <select id="feature-layer-select" style="flex-grow: 1; padding: 4px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px;">
-    </select>
-  </div>
-  <div id="class-raster-control" style="display: flex; align-items: center; gap: 4px; margin-top: 5px;">
-    <label style="width: 80px;">Classes</label>
-    <select id="class-raster-select" style="flex-grow: 1; padding: 4px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px;">
-      <option value="none">None</option>
     </select>
   </div>
 `;
@@ -561,24 +547,30 @@ try {
         }
     }
 
-    const classSelect = document.getElementById("class-raster-select");
+    // Built-in base layers win over class rasters of the same name
+    const noneButton = document.querySelector('#base-toggle button[data-layer="none"]');
     const thisLayer = layers.items.find((layer) => layer.id === id);
     for (const endpoint of thisLayer?.endpoints ?? []) {
         if (endpoint.type !== "classes_wmts_simple_png") continue;
+        if (["imagery", "osm", "none"].includes(endpoint.name)) continue;
         // Same origin as the other sources: the listed URI is built from --base-url
         classRasterUris.set(endpoint.name, new URL(endpoint.uri, globalThis.location.href).pathname);
-        const opt = document.createElement("option");
-        opt.value = endpoint.name;
-        opt.textContent = endpoint.name;
-        classSelect.appendChild(opt);
+        const btn = document.createElement("button");
+        btn.dataset.layer = endpoint.name;
+        btn.textContent = endpoint.name;
+        btn.addEventListener("click", () => setBaseLayer(endpoint.name));
+        noneButton.before(btn);
     }
-    if (classRasterUris.has(currentClassRaster)) {
-        classSelect.value = currentClassRaster;
-        setClassRaster(currentClassRaster);
-    } else {
-        currentClassRaster = "none";
+    // The style may still be loading, so wait to change built-in layers
+    if (classRasterUris.has(currentBaseLayer)) {
+        setClassRaster(currentBaseLayer);
+        for (const btn of document.querySelectorAll("#base-toggle button")) {
+            btn.classList.toggle("active", btn.dataset.layer === currentBaseLayer);
+        }
+    } else if (!["imagery", "osm", "none"].includes(currentBaseLayer)) {
+        if (mapLoaded) setBaseLayer("imagery");
+        else map.once("load", () => setBaseLayer("imagery"));
     }
-    classSelect.addEventListener("change", (e) => setClassRaster(e.target.value));
 
     if (currentFeatureLayer !== "none" && !currentFeatureUrl) {
         currentFeatureLayer = "none";

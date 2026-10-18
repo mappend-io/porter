@@ -145,5 +145,6 @@ previewed using the URL format:
 http://localhost:3200/terrarium_viewer/my-layer
 ```
 
-The layer's class rasters, if any, can be drawn over the base layer from the
-Classes menu, or with `classes=<name>` in the URL.
+The layer's class rasters, if any, are offered as base layers alongside imagery,
+selected by name or with `baseLayer=<name>` in the URL. Classes without a color
+show the background.
