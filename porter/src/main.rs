@@ -218,15 +218,25 @@ async fn main() -> Result<()> {
             .parse()
             .context("Invalid listen_addr for axum_server")?;
 
+        // Finish in-flight requests on ctrl-c, as the plain listener does
+        let handle = axum_server::Handle::new();
+        tokio::spawn({
+            let handle = handle.clone();
+            async move {
+                shutdown_signal().await;
+                handle.graceful_shutdown(Some(std::time::Duration::from_secs(30)));
+            }
+        });
         axum_server::bind_rustls(addr, tls_config)
+            .handle(handle)
             .serve(app.into_make_service())
             .await?;
     } else {
         let listener = TcpListener::bind(&config.listen_addr).await?;
 
-        let _ = axum::serve(listener, app)
+        axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal())
-            .await;
+            .await?;
     }
 
     Ok(())
