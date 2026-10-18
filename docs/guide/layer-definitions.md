@@ -30,7 +30,13 @@ locate source content. To accomplish this, several key elements are necessary:
 - `description`: An optional string to include in the layer list.
 - `assetId`: For emulation, a numeric ID for this asset. Be sure to use a unique
   value for each layer.
-- `contentTransforms`: A list of content transformations to apply
+- `contentTransforms`: A list of content transformations to apply. Each entry
+  is a transform name, or an object with the name and that transform's options,
+  e.g. `{ "name": "inline_owt_referenced_models" }`. Unknown names or options
+  are an error. Available transforms:
+  - `inline_owt_referenced_models`: Source tiles are GeoJSON points
+    referencing models (`OWT_MDL`); each `.glb` tile is served as one model
+    combining every referenced model at its point.
 - `elevationRasterContent`: Path to Mapzen Terrarium-encoded RGB PNG or F32 TIFF
   rasters within the content, if present. If defined, a Mapzen Terrarium
   endpoint will be exposed. The tokens `{FACE}`, `{LEVEL}`, `{COL}` and `{ROW}`

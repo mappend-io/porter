@@ -24,6 +24,7 @@ pub mod config;
 pub mod content_encoding;
 pub mod emulation;
 pub mod handlers;
+pub mod inline_owt_referenced_models;
 pub mod layer_definition;
 pub mod logging;
 pub mod middleware;

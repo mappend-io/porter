@@ -1,10 +1,11 @@
+use crate::inline_owt_referenced_models;
 use crate::s2_utils::*;
 use crate::{
     tiles3d,
     tiles3d::{Asset, Content, RootProperty, Tile},
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 // TODO:
 // - Need to buffer the rects from tokens for synthesized tiles so the BVs are coherent
@@ -36,7 +37,7 @@ pub struct LayerDefinition {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    pub content_transforms: BTreeSet<String>,
+    pub content_transforms: Vec<ContentTransform>,
 
     // Like: `dtm/{FACE}/{LEVEL}/{COL}/{ROW}.tif`
     #[serde(default, alias = "elevationPngContent")]
@@ -243,5 +244,104 @@ impl LayerDefinition {
             geometric_error: root.geometric_error,
             root,
         }
+    }
+}
+
+/// A content transform, given by name alone or as an object with its options:
+/// `"inline_owt_referenced_models"` or
+/// `{ "name": "inline_owt_referenced_models", ... }`. Each transform owns its
+/// options.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(try_from = "ContentTransformRepr", into = "ContentTransformRepr")]
+pub enum ContentTransform {
+    InlineOwtReferencedModels(inline_owt_referenced_models::Options),
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(untagged)]
+enum ContentTransformRepr {
+    Name(String),
+    WithOptions {
+        name: String,
+        #[serde(flatten)]
+        options: serde_json::Map<String, serde_json::Value>,
+    },
+}
+
+impl TryFrom<ContentTransformRepr> for ContentTransform {
+    type Error = String;
+
+    fn try_from(repr: ContentTransformRepr) -> Result<Self, Self::Error> {
+        let (name, options) = match repr {
+            ContentTransformRepr::Name(name) => (name, serde_json::Map::new()),
+            ContentTransformRepr::WithOptions { name, options } => (name, options),
+        };
+        let options = serde_json::Value::Object(options);
+        match name.as_str() {
+            inline_owt_referenced_models::NAME => serde_json::from_value(options)
+                .map(Self::InlineOwtReferencedModels)
+                .map_err(|e| format!("Invalid options for {name}: {e}")),
+            _ => Err(format!("Unknown content transform {name}")),
+        }
+    }
+}
+
+impl From<ContentTransform> for ContentTransformRepr {
+    fn from(transform: ContentTransform) -> Self {
+        let (name, options) = match &transform {
+            ContentTransform::InlineOwtReferencedModels(options) => (
+                inline_owt_referenced_models::NAME,
+                serde_json::to_value(options),
+            ),
+        };
+        // Without options, keep the plain name, so existing layers hash the same
+        match options {
+            Ok(serde_json::Value::Object(options)) if !options.is_empty() => Self::WithOptions {
+                name: name.to_string(),
+                options,
+            },
+            _ => Self::Name(name.to_string()),
+        }
+    }
+}
+
+impl LayerDefinition {
+    // find_map is for when there is more than one transform
+    #[allow(clippy::unnecessary_find_map)]
+    pub fn inline_owt_referenced_models(&self) -> Option<&inline_owt_referenced_models::Options> {
+        self.content_transforms
+            .iter()
+            .find_map(|transform| match transform {
+                ContentTransform::InlineOwtReferencedModels(options) => Some(options),
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_transforms_accept_names_and_options() {
+        let parse = |json: &str| serde_json::from_str::<Vec<ContentTransform>>(json);
+
+        let by_name = parse(r#"["inline_owt_referenced_models"]"#).unwrap();
+        let with_options = parse(r#"[{"name": "inline_owt_referenced_models"}]"#).unwrap();
+        assert_eq!(by_name, with_options);
+        assert_eq!(
+            by_name,
+            vec![ContentTransform::InlineOwtReferencedModels(
+                inline_owt_referenced_models::Options::default()
+            )]
+        );
+
+        // Serializes back to the plain name, which keeps layer hashes stable
+        assert_eq!(
+            serde_json::to_string(&with_options).unwrap(),
+            r#"["inline_owt_referenced_models"]"#
+        );
+
+        assert!(parse(r#"["no_such_transform"]"#).is_err());
+        assert!(parse(r#"[{"name": "inline_owt_referenced_models", "typo": 1}]"#).is_err());
     }
 }

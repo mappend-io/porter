@@ -1,16 +1,15 @@
 use crate::app_state::AppState;
 use crate::content_encoding::entry_response;
+use crate::inline_owt_referenced_models;
 use crate::tiles3d;
 use crate::utils::*;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use axum::http::{HeaderMap, HeaderValue, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, extract::Path, extract::Query, extract::State, http::StatusCode};
-use geojson::{GeoJson, Geometry, GeometryValue};
 use iri_string::types::{UriAbsoluteStr, UriReferenceStr, UriRelativeStr};
 use metrics::counter;
 use serde::{Deserialize, Serialize};
-use transforms::combine_referenced_models::*;
 
 #[derive(Serialize)]
 pub struct LayerItemEndpoint {
@@ -244,180 +243,38 @@ pub async fn get_content_payload(
     }
     let root = UriAbsoluteStr::new(&content_root).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let relative = UriReferenceStr::new(&paths.rest).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let mut resolved = relative.resolve_against(root).to_string();
+    let resolved = relative.resolve_against(root).to_string();
 
-    // HACK: I don't know what direction content transforms will go.
-    // For now, to get something out, since we only have one, do the
-    // simple thing. Eventually these will be chained together and
-    // more configurable.
-    let inline_owt_referenced_models = layer_def
-        .content_transforms
-        .contains("inline_owt_referenced_models");
+    if let Some(options) = layer_def.inline_owt_referenced_models()
+        && inline_owt_referenced_models::transforms_payload(&paths.rest)
+    {
+        let bytes =
+            inline_owt_referenced_models::tile_payload(&app_state, options, root, &resolved)
+                .await?;
 
-    if inline_owt_referenced_models && paths.rest.ends_with(".glb") {
-        resolved = resolved.replace(".glb", ".geojson");
-    }
-
-    let uri = UriAbsoluteStr::new(&resolved).map_err(|_| StatusCode::BAD_REQUEST)?;
-
-    // Untransformed content is served as stored, still compressed if the client
-    // accepts the archive's encoding
-    if !(inline_owt_referenced_models && paths.rest.ends_with(".glb")) {
-        let entry = app_state
-            .resource_loader
-            .read_entry_async(uri)
-            .await
-            .map_err(|_| StatusCode::NOT_FOUND)?; // TODO: distinguish 404 vs 500
+        let content_type = sniff_content_type(&bytes);
+        let mut headers = HeaderMap::new();
+        headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
 
         // TODO: Add s2_level
         counter!("porter_content_3dtiles_tiles_total").increment(1);
 
-        return entry_response(entry, &request_headers).await;
+        return Ok((headers, bytes).into_response());
     }
 
-    let mut bytes = app_state
+    // Untransformed content is served as stored, still compressed if the client
+    // accepts the archive's encoding
+    let uri = UriAbsoluteStr::new(&resolved).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let entry = app_state
         .resource_loader
-        .read_async(uri)
+        .read_entry_async(uri)
         .await
         .map_err(|_| StatusCode::NOT_FOUND)?; // TODO: distinguish 404 vs 500
-
-    // This all doesn't belong here, but I am waiting to see what the second transform looks like
-    {
-        let mut referenced_models = vec![];
-        let geojson_bytes = bytes.clone();
-        let geojson = tokio::task::spawn_blocking(move || GeoJson::from_reader(&geojson_bytes[..]))
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        let features = match geojson {
-            GeoJson::FeatureCollection(fc) => fc.features,
-            GeoJson::Feature(f) => vec![f],
-            GeoJson::Geometry(_) => todo!(),
-        };
-
-        let _instance_count = 0_u64;
-
-        for feature in &features {
-            if let Some(Geometry {
-                value: GeometryValue::MultiPoint { coordinates },
-                ..
-            }) = &feature.geometry
-            {
-                let mdl = feature
-                    .properties
-                    .as_ref()
-                    // TODO: The transform config should say what column to take
-                    .and_then(|p| p.get("OWT_MDL"))
-                    .and_then(|v| v.as_str());
-
-                let uri_ref = UriReferenceStr::new(mdl.unwrap())
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-                let norm_ref = uri_ref.resolve_against(uri).and_normalize().to_string();
-
-                let aoo = feature
-                    .properties
-                    .as_ref()
-                    // TODO: The transform config should say what column to take, if any, otherwise use 0
-                    .and_then(|p| p.get("AOO"))
-                    .and_then(|v| v.as_f64());
-
-                for pos in coordinates {
-                    let lon = pos[0];
-                    let lat = pos[1];
-                    let elev = if pos.len() >= 3 { Some(pos[2]) } else { None };
-
-                    let model_to_world = local_to_ecef_with_rotation(
-                        lon,
-                        lat,
-                        elev.unwrap_or(0.0),
-                        0.0,
-                        aoo.unwrap_or(0.0),
-                        0.0,
-                    );
-
-                    // TODO: I'm not handling reuse well, I'm making a separate
-                    // unique instance even if it's shared. This will burn us
-                    // for trees, etc.
-                    referenced_models.push(ReferencedModel {
-                        model_uri: norm_ref
-                            .parse()
-                            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
-                        instances: vec![ReferencedModelInstance { model_to_world }],
-                    });
-                }
-            }
-        }
-
-        // TODO: It'd be better to return an empty model than a 404
-        if referenced_models.is_empty() {
-            return Err(StatusCode::NOT_FOUND);
-        }
-
-        // TODO: Hackily taking the first reference's matrix as the root matrix
-        let root_matrix = gltf_arc::snap_dmat4_to_f32(
-            referenced_models
-                .first()
-                .context("No reference models")
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-                .instances
-                .first()
-                .context("No instances in first referenced model")
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-                .model_to_world,
-        )
-        .as_mat4();
-
-        let doc = combine_referenced_models(
-            root,
-            uri,
-            &referenced_models,
-            root_matrix,
-            app_state.resource_loader.clone(),
-        )
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        let mut raw_doc = tokio::task::spawn_blocking(move || doc.to_gltf_types())
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        raw_doc.0.buffers[0].data = raw_doc.1;
-
-        // TODO: Put the y-up xform back, hackily!
-        for node in &mut raw_doc.0.nodes {
-            if let Some(m) = &node.matrix {
-                node.matrix = Some(
-                    (glam::Mat4::from_rotation_x((-90.0_f32).to_radians())
-                        * glam::Mat4::from_cols_array(m))
-                    .to_cols_array(),
-                );
-            }
-        }
-
-        bytes = tokio::task::spawn_blocking(move || gltf_io::write::create_glb(&raw_doc.0))
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        counter!("porter_transform_inline_owt_referenced_models_tiles_total").increment(1);
-        counter!("porter_transform_inline_owt_referenced_models_unique_models_total")
-            .increment(referenced_models.len() as u64);
-        //counter!("porter_transform_inline_owt_referenced_models_unique_instances_total")
-        //    .increment(features.len() as u64);
-    }
-
-    // TODO: If the payload is a tileset, we need to (temporarily, until CesiumJS is fixed), strip the tileset metadata and schema.
-    // Or maybe just add the schema to the toplevel schema for terrain in the tileset. That's probably best.
-
-    let content_type = sniff_content_type(&bytes);
-    let mut headers = HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
 
     // TODO: Add s2_level
     counter!("porter_content_3dtiles_tiles_total").increment(1);
 
-    Ok((headers, bytes).into_response())
+    entry_response(entry, &request_headers).await
 }
 
 #[derive(Deserialize)]
