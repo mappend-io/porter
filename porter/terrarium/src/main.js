@@ -556,7 +556,8 @@ try {
     const thisLayer = layers.items.find((layer) => layer.id === id);
     for (const endpoint of thisLayer?.endpoints ?? []) {
         if (endpoint.type !== "classes_wmts_simple_png") continue;
-        classRasterUris.set(endpoint.name, endpoint.uri);
+        // Same origin as the other sources: the listed URI is built from --base-url
+        classRasterUris.set(endpoint.name, new URL(endpoint.uri, globalThis.location.href).pathname);
         const opt = document.createElement("option");
         opt.value = endpoint.name;
         opt.textContent = endpoint.name;
