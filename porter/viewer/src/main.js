@@ -212,7 +212,11 @@ function styleLulcOnceDetected(tileset) {
 }
 
 async function loadLayer(name) {
-    const tileset = await Cesium3DTileset.fromUrl(`/${name}`);
+    const wireframe = params.has("wireframe");
+    const tileset = await Cesium3DTileset.fromUrl(`/${name}`, {
+        enableDebugWireframe: wireframe,
+        debugWireframe: wireframe,
+    });
     tileset.cacheBytes = 1024 * (1 << 20);
     if (params.has("lulc")) styleLulcOnceDetected(tileset);
     viewer.scene.primitives.add(tileset);

@@ -14,5 +14,8 @@
   },
   "dependencies": {
     "cesium": "^1.140.0"
+  },
+  "patchedDependencies": {
+    "cesium@1.140.0": "patches/cesium@1.140.0.patch"
   }
 }

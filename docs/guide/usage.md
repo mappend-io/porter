@@ -136,6 +136,10 @@ tileset.colorBlendMode = Cesium.Cesium3DTileColorBlendMode.REPLACE;
 CesiumJS downloads the land cover texture of each terrain tile whether or not
 it's shown.
 
+Add `wireframe` to draw the content's triangles as lines. The bundled CesiumJS
+is patched so this works with 32-bit indices on meshes that would fit 16-bit
+ones; CesiumJS otherwise reads such indices back as 16-bit (as of 1.140).
+
 ## Bundled MaplibreGL JS viewer for Mapzen Terrarium/WMTS imagery tiles
 
 Porter includes a bundled MaplibreGL environment. Elevation and imagery data may be
