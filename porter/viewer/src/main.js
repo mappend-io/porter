@@ -16,6 +16,8 @@ import {
     DirectionalLight,
     Cesium3DTileStyle,
     Cesium3DTileColorBlendMode,
+    CustomShader,
+    LightingModel,
 } from "cesium";
 import "cesium/Build/Cesium/Widgets/widgets.css";
 import "./style.css";
@@ -211,15 +213,36 @@ function styleLulcOnceDetected(tileset) {
     });
 }
 
+// With ?wireframe, each layer is drawn again as lines over its filled self.
+// Moving each vertex a little towards the camera, along its line of sight,
+// keeps the lines in place on screen but in front of the fill.
+const wireframeShader = new CustomShader({
+    lightingModel: LightingModel.UNLIT,
+    vertexShaderText: `
+        void vertexMain(VertexInput vsInput, inout czm_modelVertexOutput vsOutput) {
+            vec3 eyeMC = (czm_inverseModelView * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+            vsOutput.positionMC = mix(vsOutput.positionMC, eyeMC, 0.001);
+        }`,
+    fragmentShaderText: `
+        void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {
+            material.diffuse = vec3(1.0);
+        }`,
+});
+
 async function loadLayer(name) {
-    const wireframe = params.has("wireframe");
-    const tileset = await Cesium3DTileset.fromUrl(`/${name}`, {
-        enableDebugWireframe: wireframe,
-        debugWireframe: wireframe,
-    });
+    const tileset = await Cesium3DTileset.fromUrl(`/${name}`);
     tileset.cacheBytes = 1024 * (1 << 20);
     if (params.has("lulc")) styleLulcOnceDetected(tileset);
     viewer.scene.primitives.add(tileset);
+    if (params.has("wireframe")) {
+        const wireframe = await Cesium3DTileset.fromUrl(`/${name}`, {
+            enableDebugWireframe: true,
+            debugWireframe: true,
+            customShader: wireframeShader,
+        });
+        wireframe.cacheBytes = tileset.cacheBytes;
+        viewer.scene.primitives.add(wireframe);
+    }
     return tileset;
 }
 
