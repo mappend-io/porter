@@ -211,9 +211,11 @@ impl ArchiveIndex {
         // Read the index's Local File Header (LFH) and data in one request. The
         // LFH carries the same name as the central directory entry, and usually
         // an extra field of the same size; if it doesn't, read the data again.
+        // The index is cached parsed, so read it directly rather than through the
+        // block cache, which would split it into block-sized requests.
         let expected_len = 30 + filename_len as u64 + extra_field_len as u64 + data_size;
         let entry_bytes = reader
-            .read_range_async(local_header_offset, expected_len)
+            .read_range_direct_async(local_header_offset, expected_len)
             .await?;
         if entry_bytes.len() < 30 || entry_bytes[0..4] != LFH_SIGNATURE {
             return Err(Error::BadArchive(
@@ -230,7 +232,7 @@ impl ArchiveIndex {
             entry_bytes.slice(data_rel as usize..(data_rel + data_size) as usize)
         } else {
             reader
-                .read_range_async(local_header_offset + data_rel, data_size)
+                .read_range_direct_async(local_header_offset + data_rel, data_size)
                 .await?
         };
 

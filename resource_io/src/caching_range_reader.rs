@@ -161,7 +161,41 @@ impl RangeReader for CachingRangeReader {
     }
 
     async fn read_range_direct_async(&self, offset: u64, length: u64) -> Result<Bytes, Error> {
+        if let Some(bytes) = self.read_cached_range(offset, length) {
+            return Ok(bytes);
+        }
         self.reader.read_range_async(offset, length).await
+    }
+}
+
+impl CachingRangeReader {
+    /// The range, if every block it covers is already cached (e.g. seeded from
+    /// the tail); never fetches
+    fn read_cached_range(&self, offset: u64, length: u64) -> Option<Bytes> {
+        let length = std::cmp::min(length, self.size().saturating_sub(offset));
+        if length == 0 {
+            return Some(Bytes::new());
+        }
+        let start_block = offset / self.block_size;
+        let end_block = (offset + length - 1) / self.block_size;
+        let blocks = (start_block..=end_block)
+            .map(|block_index| self.cache.get(&(self.cache_namespace, block_index)))
+            .collect::<Option<Vec<_>>>()?;
+
+        let end = offset + length;
+        if let [block] = blocks.as_slice() {
+            let block_start = start_block * self.block_size;
+            let range = (offset - block_start) as usize..(end - block_start) as usize;
+            return (range.end <= block.len()).then(|| block.slice(range));
+        }
+        let mut result = BytesMut::with_capacity(length as usize);
+        for (block_index, block) in (start_block..).zip(&blocks) {
+            let block_start = block_index * self.block_size;
+            let from = offset.saturating_sub(block_start) as usize;
+            let to = std::cmp::min((end - block_start) as usize, block.len());
+            result.extend_from_slice(block.get(from..to)?);
+        }
+        (result.len() as u64 == length).then(|| result.freeze())
     }
 }
 
@@ -220,5 +254,42 @@ mod tests {
             data.slice(20..24)
         );
         assert_eq!(inner.reads.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn direct_reads_use_cached_blocks_only() {
+        let data = Bytes::from((0..56u8).collect::<Vec<_>>());
+        let inner = Arc::new(MemReader {
+            data: data.clone(),
+            reads: AtomicUsize::new(0),
+        });
+        let cache = Arc::new(Cache::with_weighter(16, 1024, BytesWeighter));
+        let reader = CachingRangeReader::new(inner.clone(), 16, [0; 16], cache);
+        reader.seed_from_tail(20, &data.slice(20..));
+
+        // Within the seeded blocks 2 and 3, across a block boundary and to EOF
+        for (offset, length) in [(33, 5), (40, 16), (32, 100)] {
+            let end = std::cmp::min(offset + length, 56);
+            assert_eq!(
+                reader
+                    .read_range_direct_async(offset, length)
+                    .await
+                    .unwrap(),
+                data.slice(offset as usize..end as usize)
+            );
+        }
+        assert_eq!(inner.reads.load(Ordering::Relaxed), 0);
+
+        // Touching an uncached block reads the whole range from the inner
+        // reader, without caching it
+        assert_eq!(
+            reader.read_range_direct_async(10, 30).await.unwrap(),
+            data.slice(10..40)
+        );
+        assert_eq!(
+            reader.read_range_direct_async(10, 30).await.unwrap(),
+            data.slice(10..40)
+        );
+        assert_eq!(inner.reads.load(Ordering::Relaxed), 2);
     }
 }
