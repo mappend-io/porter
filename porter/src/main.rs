@@ -101,6 +101,9 @@ async fn main() -> Result<()> {
         resource_loader: ResourceLoader::new(resource_loader_config).await,
         layer_definition_cache: Arc::new(layer_definition_cache),
         inline_owt_referenced_models_sources: Default::default(),
+        raster_source_cache: terrarium::RasterSourceCache::new(
+            config.raster_source_cache_size.as_u64(),
+        ),
     };
 
     let compat_routes = Router::new()

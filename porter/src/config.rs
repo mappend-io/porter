@@ -47,6 +47,11 @@ pub struct Config {
     #[arg(long, env, default_value = "1GiB")]
     pub entry_cache_size: ByteSize,
 
+    /// Bound cache of decoded raster sources, shared by the imagery,
+    /// elevation and class tiles cut from them
+    #[arg(long, env, default_value = "512MiB")]
+    pub raster_source_cache_size: ByteSize,
+
     /// TLS certificate file path
     #[arg(long, env = "TLS_CERT", requires = "tls_key")]
     pub tls_cert: Option<String>,

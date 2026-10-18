@@ -13,6 +13,8 @@ futures = "0.3.32"
 glam = { version = "0.32.1", features = ["bytemuck"] }
 iri-string = "0.7.12"
 jpeg-encoder = "0.7.0"
+metrics = "0.24.6"
+moka = { version = "0.12.15", features = ["future"] }
 png = "0.18.1"
 regex = "1.12.3"
 resource_io = { workspace = true }

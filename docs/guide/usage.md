@@ -51,6 +51,8 @@ Options:
           Bound resource loader block cache [env: BLOCK_CACHE_SIZE=] [default: 2GiB]
       --entry-cache-size <ENTRY_CACHE_SIZE>
           Bound resource loader cache of compressed archive entries, used when reading many small entries at once, e.g. referenced models [env: ENTRY_CACHE_SIZE=] [default: 1GiB]
+      --raster-source-cache-size <RASTER_SOURCE_CACHE_SIZE>
+          Bound cache of decoded raster sources, shared by the imagery, elevation and class tiles cut from them [env: RASTER_SOURCE_CACHE_SIZE=] [default: 512MiB]
       --tls-cert <TLS_CERT>
           TLS certificate file path [env: TLS_CERT=]
       --tls-key <TLS_KEY>

@@ -110,6 +110,20 @@ is for one entry:
 
 A low hit rate under steady traffic suggests increasing `ENTRY_CACHE_SIZE`.
 
+### Raster source cache
+
+Imagery, elevation and class tiles are cut from decoded source rasters, which
+are cached. Each lookup is for one source:
+
+- `porter_raster_source_cache_queries`: Source lookups
+- `porter_raster_source_cache_hits`: Lookups served from the cache, including
+  lookups that waited on another tile's in-flight decode of the same source
+- `porter_raster_source_cache_misses`: Lookups that read and decoded the
+  source, or found it missing
+
+A low hit rate under steady traffic suggests increasing
+`RASTER_SOURCE_CACHE_SIZE`.
+
 ### Archive prefetch
 
 - `porter_archive_prefetches_total`: Background archive opens started while

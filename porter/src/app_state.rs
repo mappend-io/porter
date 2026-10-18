@@ -12,6 +12,7 @@ pub struct AppState {
     pub resource_loader: ResourceLoader,
     pub layer_definition_cache: Arc<Cache<String, Arc<LayerDefinition>>>,
     pub inline_owt_referenced_models_sources: crate::inline_owt_referenced_models::SourceCache,
+    pub raster_source_cache: terrarium::RasterSourceCache,
 }
 
 fn is_valid_identifier(s: &str) -> bool {

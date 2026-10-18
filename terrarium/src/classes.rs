@@ -8,11 +8,12 @@ use futures::future::join_all;
 use tokio::task::spawn_blocking;
 
 use super::{
-    MapzenTileIndex, face_level_col_row_from_cell_id, gd_rect_to_s2_coverage,
+    MapzenTileIndex, RasterSourceCache, face_level_col_row_from_cell_id, gd_rect_to_s2_coverage,
     mapzen_tile_to_wgs84_envelope, mapzen_zoom_to_s2_level, parse_pam_geotransform,
-    resolve_elevation_raster_uri_tokens, skip_missing_source,
+    resolve_elevation_raster_uri_tokens,
 };
 use crate::pixel_st::PixelStTable;
+use crate::source_cache::present;
 
 /// RGBA color for each class ID. Alpha 0 leaves the class out of the tile.
 pub type ClassColors = [[u8; 4]; 256];
@@ -253,6 +254,7 @@ pub fn encode_wmts_simple_class_tile_png(
 
 pub async fn build_simple_wmts_class_tile(
     resource_loader: resource_io::ResourceLoader,
+    source_cache: &RasterSourceCache,
     raster_template_uri: &str, // Path to rasters, we replace {CONTENT_ROOT_TOKEN}, {FACE}, {LEVEL}, {COL}, {ROW}
     fallback_raster_template_uri: Option<String>, // Path to rasters, we replace {CONTENT_ROOT_TOKEN}, {FACE}, {LEVEL}, {COL}, {ROW}
     s2_content_package_level: i32,
@@ -275,18 +277,18 @@ pub async fn build_simple_wmts_class_tile(
     let gd_coverage = mapzen_tile_to_wgs84_envelope(index);
     let s2_raster_tokens = gd_rect_to_s2_coverage(&gd_coverage, s2_raster_level);
 
-    let s2_rasters: Vec<_> = join_all(s2_raster_tokens.iter().map(|token| {
-        read_content_raster_s2_from_class_png(
-            resource_loader.clone(),
-            &uri,
-            s2_content_package_level,
-            *token,
-        )
-    }))
-    .await
-    .into_iter()
-    .filter_map(skip_missing_source)
-    .collect::<Result<_>>()?;
+    // The sources, decoded once and shared by the tiles that overlap them
+    let s2_rasters = present(
+        join_all(s2_raster_tokens.iter().map(|token| {
+            source_cache.classes(
+                resource_loader.clone(),
+                &uri,
+                s2_content_package_level,
+                *token,
+            )
+        }))
+        .await,
+    )?;
 
     let index = *index;
     let colors = *colors;

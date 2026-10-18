@@ -3836,6 +3836,8 @@ dependencies = [
  "glam",
  "iri-string",
  "jpeg-encoder",
+ "metrics",
+ "moka",
  "png",
  "regex",
  "resource_io",

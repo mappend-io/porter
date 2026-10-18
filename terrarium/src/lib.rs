@@ -1,16 +1,19 @@
 use anyhow::{Context, Result, bail};
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::future::join_all;
+use source_cache::present;
 use tokio::task::spawn_blocking;
 use warp::{apply_elevation_warp_from_source, elevation_pixel_st_table};
 
 pub use classes::*;
 pub use geo::*;
+pub use source_cache::RasterSourceCache;
 pub use utils::*;
 
 mod classes;
 mod geo;
 mod pixel_st;
+mod source_cache;
 mod utils;
 mod warp;
 mod warp_imagery;
@@ -357,26 +360,12 @@ pub fn make_empty_tile(index: &MapzenTileIndex) -> Bytes {
     encode_mapzen_elevation_tile_png(&r)
 }
 
-// Sources outside the data's coverage don't exist, and the tile is built
-// without them. Any other failure fails the tile, rather than serving a partial
-// one that would be cached as if it were complete.
-fn skip_missing_source<T>(result: Result<T>) -> Option<Result<T>> {
-    match result {
-        Err(e)
-            if e.downcast_ref::<resource_io::Error>()
-                .is_some_and(|e| e.is_not_found()) =>
-        {
-            None
-        }
-        result => Some(result),
-    }
-}
-
 // Questions:
 // - TODO: Lookup whether mapzen tiles are bathymetry in water or hydro surface
 // - TODO: Lookup whether mapzen elevations are hae or msl
 pub async fn build_terrarium_rgb_tile(
     resource_loader: resource_io::ResourceLoader,
+    source_cache: &RasterSourceCache,
     raster_template_uri: &str, // Path to rasters, we replace {CONTENT_ROOT_TOKEN}, {FACE}, {LEVEL}, {COL}, {ROW}
     fallback_raster_template_uri: Option<String>,
     s2_content_package_level: i32,
@@ -421,31 +410,18 @@ pub async fn build_terrarium_rgb_tile(
         raster_template_uri.to_string()
     };
 
-    // For each content S2 package, read the S2 raster token files
-    use futures::future::FutureExt;
-    let s2_rasters: Vec<_> = join_all(s2_raster_tokens.iter().map(|token| {
-        if raster_template_uri.ends_with(".png") {
-            read_content_raster_s2_from_terrarium_rgb_png(
+    // The sources, decoded once and shared by the tiles that overlap them
+    let s2_rasters = present(
+        join_all(s2_raster_tokens.iter().map(|token| {
+            source_cache.elevation(
                 resource_loader.clone(),
                 &uri,
                 s2_content_package_level,
                 *token,
             )
-            .boxed()
-        } else {
-            read_content_raster_s2_from_lerc_zstd_tif(
-                resource_loader.clone(),
-                &uri,
-                s2_content_package_level,
-                *token,
-            )
-            .boxed()
-        }
-    }))
-    .await
-    .into_iter()
-    .filter_map(skip_missing_source)
-    .collect::<Result<_>>()?;
+        }))
+        .await,
+    )?;
 
     // Make output image, our warp target
     let index = *index;
@@ -500,6 +476,7 @@ pub fn make_empty_wmts_simple_imagery_tile(index: &MapzenTileIndex) -> Bytes {
 
 pub async fn build_simple_wmts_imagery_tile(
     resource_loader: resource_io::ResourceLoader,
+    source_cache: &RasterSourceCache,
     raster_template_uri: &str, // Path to rasters, we replace {CONTENT_ROOT_TOKEN}, {FACE}, {LEVEL}, {COL}, {ROW}
     fallback_raster_template_uri: Option<String>, // Path to rasters, we replace {CONTENT_ROOT_TOKEN}, {FACE}, {LEVEL}, {COL}, {ROW}
     s2_content_package_level: i32,
@@ -544,19 +521,18 @@ pub async fn build_simple_wmts_imagery_tile(
         raster_template_uri.to_string()
     };
 
-    // For each content S2 package, read the S2 raster token files
-    let s2_rasters: Vec<_> = join_all(s2_raster_tokens.iter().map(|token| {
-        read_content_raster_s2_from_jpg(
-            resource_loader.clone(),
-            &uri,
-            s2_content_package_level,
-            *token,
-        )
-    }))
-    .await
-    .into_iter()
-    .filter_map(skip_missing_source)
-    .collect::<Result<_>>()?;
+    // The sources, decoded once and shared by the tiles that overlap them
+    let s2_rasters = present(
+        join_all(s2_raster_tokens.iter().map(|token| {
+            source_cache.imagery(
+                resource_loader.clone(),
+                &uri,
+                s2_content_package_level,
+                *token,
+            )
+        }))
+        .await,
+    )?;
 
     // Make output image, our warp target
     let index = *index;
@@ -683,26 +659,4 @@ pub async fn read_content_raster_s2_from_jpg(
     })
     .await
     .context("Join error")?
-}
-
-#[cfg(test)]
-mod missing_source_tests {
-    use super::*;
-
-    #[test]
-    fn only_missing_sources_are_skipped() {
-        let missing: Result<()> = Err(anyhow::Error::from(resource_io::Error::NotFound(
-            "no such key".to_string(),
-        )))
-        .context("Could not read source");
-        assert!(skip_missing_source(missing).is_none());
-
-        let failed: Result<()> = Err(anyhow::Error::from(resource_io::Error::Io(
-            std::io::Error::other("S3 GetObject failed"),
-        )))
-        .context("Could not read source");
-        assert!(matches!(skip_missing_source(failed), Some(Err(_))));
-
-        assert!(matches!(skip_missing_source(Ok(1)), Some(Ok(1))));
-    }
 }

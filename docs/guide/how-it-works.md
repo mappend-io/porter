@@ -32,6 +32,12 @@ Most use QuickCache, which evicts with a CLOCK-PRO-style policy.
   entries. Instead each entry is read as an exact byte range (from its offset
   in the archive index to the next entry's), with entries close together
   sharing a request, and the still-compressed entries are cached here.
+- **Raster sources** (moka, `RASTER_SOURCE_CACHE_SIZE`, default `512MiB`).
+  Imagery, elevation and class tiles are cut from 2048x2048 source rasters,
+  each overlapping many output tiles. A decoded source (12MiB of pixels for
+  imagery) is kept and shared, and concurrent tiles that need the same source
+  wait for one decode. Missing sources are remembered too, since every tile
+  overlapping one would otherwise look for it again.
 - **Layer definitions** (moka, up to 1024 entries, TTL `LAYER_DEFINITION_TTL`,
   default `5m`). Layer definitions are always read fresh from the source,
   skipping the reader and block caches, so an updated definition takes effect

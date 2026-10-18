@@ -417,6 +417,7 @@ pub async fn get_terrarium_tile(
 
     let bytes = terrarium::build_terrarium_rgb_tile(
         app_state.resource_loader.clone(),
+        &app_state.raster_source_cache,
         &raster_png_uri,
         fallback_raster_png_uri,
         layer_def.source_s2_content_package_level,
@@ -498,6 +499,7 @@ pub async fn get_wmts_simple_imagery(
 
     let bytes = terrarium::build_simple_wmts_imagery_tile(
         app_state.resource_loader.clone(),
+        &app_state.raster_source_cache,
         &raster_png_uri,
         fallback_raster_png_uri,
         layer_def.source_s2_content_package_level,
@@ -569,6 +571,7 @@ pub async fn get_wmts_class_tile(
 
     let bytes = terrarium::build_simple_wmts_class_tile(
         app_state.resource_loader.clone(),
+        &app_state.raster_source_cache,
         &raster_png_uri,
         fallback_raster_png_uri,
         layer_def.source_s2_content_package_level,
