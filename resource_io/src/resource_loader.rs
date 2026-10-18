@@ -553,25 +553,31 @@ impl ResourceLoader {
                 let bucket = s3_bucket(uri)?.to_string();
                 let prefix = uri.path_str().trim_start_matches('/').to_string();
 
-                let res = self
+                // Only the objects directly under the prefix (the delimiter
+                // folds deeper keys into common prefixes), across every page:
+                // a page holds at most 1000 keys
+                let mut pages = self
                     .s3_client
                     .list_objects_v2()
                     .bucket(bucket)
                     .prefix(&prefix)
-                    .send()
-                    .await
-                    .map_err(|e| Error::S3(e.to_string()))?;
+                    .delimiter("/")
+                    .into_paginator()
+                    .send();
 
                 let mut items = vec![];
-                for obj in res.contents() {
-                    if let Some(key) = obj.key() {
-                        // Strip the prefix, it better be there
-                        let Some(relative) = key.strip_prefix(&prefix) else {
-                            continue;
-                        };
-                        // Only keep non-empty keys without a slash
-                        if !relative.contains('/') && !relative.is_empty() {
-                            items.push(relative.to_string());
+                while let Some(page) = pages.next().await {
+                    let page = page.map_err(|e| Error::S3(e.to_string()))?;
+                    for obj in page.contents() {
+                        if let Some(key) = obj.key() {
+                            // Strip the prefix, it better be there
+                            let Some(relative) = key.strip_prefix(&prefix) else {
+                                continue;
+                            };
+                            // Only keep non-empty keys without a slash
+                            if !relative.contains('/') && !relative.is_empty() {
+                                items.push(relative.to_string());
+                            }
                         }
                     }
                 }
