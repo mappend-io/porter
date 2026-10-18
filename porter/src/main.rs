@@ -95,6 +95,7 @@ async fn main() -> Result<()> {
         config: config.clone(),
         resource_loader: ResourceLoader::new(resource_loader_config).await,
         layer_definition_cache: Arc::new(layer_definition_cache),
+        inline_owt_referenced_models_sources: Default::default(),
     };
 
     let compat_routes = Router::new()
