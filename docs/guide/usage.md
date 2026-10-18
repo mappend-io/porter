@@ -141,6 +141,9 @@ copy of the tileset. The bundled CesiumJS is patched so this works with 32-bit
 indices on meshes that would fit 16-bit ones; CesiumJS otherwise reads such
 indices back as 16-bit (as of 1.140).
 
+The Globe, Land cover and Wireframe checkboxes switch `noglobe`, `lulc` and
+`wireframe` without reloading, and keep the URL up to date.
+
 ## Bundled MaplibreGL JS viewer for Mapzen Terrarium/WMTS imagery tiles
 
 Porter includes a bundled MaplibreGL environment. Elevation and imagery data may be

@@ -24,7 +24,12 @@ import "./style.css";
 import baseImageUrl from "./assets/world.topo.bathy.200406.3x5400x2700.jpg";
 
 const params = new URLSearchParams(globalThis.location.search);
-const showGlobe = !params.has("noglobe");
+// Display options, from the URL and the checkboxes, kept in the URL as flags
+const options = {
+    globe: !params.has("noglobe"),
+    lulc: params.has("lulc"),
+    wireframe: params.has("wireframe"),
+};
 
 function getInitialView() {
     return {
@@ -41,13 +46,7 @@ const initial = getInitialView();
 
 const viewer = new Viewer("cesiumContainer", {
     terrain: new Terrain(new EllipsoidTerrainProvider()),
-    baseLayer: showGlobe
-        ? ImageryLayer.fromProviderAsync(
-            SingleTileImageryProvider.fromUrl(baseImageUrl, {
-                rectangle: Rectangle.fromDegrees(-180, -90, 180, 90),
-            }),
-        )
-        : false,
+    baseLayer: false,
     animation: false,
     timeline: false,
     baseLayerPicker: false,
@@ -66,19 +65,31 @@ viewer.scene.preRender.addEventListener((scene) => {
 
 viewer.cesiumWidget.creditContainer.style.display = "none";
 
-if (showGlobe) {
-    // Fade the globe out as we approach it to avoid conflicting with the 3D Tiles layers
-    viewer.scene.globe.depthTestAgainstTerrain = false;
-    viewer.scene.globe.translucency.enabled = true;
-    viewer.scene.globe.translucency.frontFaceAlphaByDistance = new NearFarScalar(
-        1000.0,
-        0.0,
-        10000.0,
-        0.5,
-    );
-} else {
-    viewer.scene.globe.show = false;
+// Fade the globe out as we approach it to avoid conflicting with the 3D Tiles layers
+viewer.scene.globe.depthTestAgainstTerrain = false;
+viewer.scene.globe.translucency.enabled = true;
+viewer.scene.globe.translucency.frontFaceAlphaByDistance = new NearFarScalar(
+    1000.0,
+    0.0,
+    10000.0,
+    0.5,
+);
+
+// The globe's imagery loads when the globe is first shown
+let globeImagery;
+function updateGlobe() {
+    if (options.globe && !globeImagery) {
+        globeImagery = viewer.imageryLayers.add(
+            ImageryLayer.fromProviderAsync(
+                SingleTileImageryProvider.fromUrl(baseImageUrl, {
+                    rectangle: Rectangle.fromDegrees(-180, -90, 180, 90),
+                }),
+            ),
+        );
+    }
+    viewer.scene.globe.show = options.globe;
 }
+updateGlobe();
 
 if (!Number.isNaN(initial.lon) && !Number.isNaN(initial.lat) && !Number.isNaN(initial.height)) {
     viewer.camera.setView({
@@ -196,24 +207,35 @@ handler.setInputAction((movement) => {
     }
 }, ScreenSpaceEventType.MOUSE_MOVE);
 
-// With ?lulc, show land cover instead of imagery on tilesets whose features
-// carry a class color (the terrain's EXT_mesh_features LULC texture, with
-// colors from each tile's property table)
+// Loaded layers: { name, tileset, hasClassColors, wireframe }
+const layers = [];
+
+// Land cover shows instead of imagery on tilesets whose features carry a class
+// color (the terrain's EXT_mesh_features LULC texture, with colors from each
+// tile's property table)
 const lulcStyle = new Cesium3DTileStyle({
     color: "rgb(${color}[0], ${color}[1], ${color}[2])",
 });
 
-function styleLulcOnceDetected(tileset) {
-    const removeListener = tileset.tileLoad.addEventListener((tile) => {
+function watchForClassColors(layer) {
+    const removeListener = layer.tileset.tileLoad.addEventListener((tile) => {
         const content = tile.content;
         if (!(content.featuresLength > 0) || !content.getFeature(0).hasProperty("color")) return;
         removeListener();
-        tileset.style = lulcStyle;
-        tileset.colorBlendMode = Cesium3DTileColorBlendMode.REPLACE;
+        layer.hasClassColors = true;
+        updateLulc(layer);
     });
 }
 
-// With ?wireframe, each layer is drawn again as lines over its filled self.
+function updateLulc(layer) {
+    const lulc = options.lulc && layer.hasClassColors;
+    layer.tileset.style = lulc ? lulcStyle : undefined;
+    layer.tileset.colorBlendMode = lulc
+        ? Cesium3DTileColorBlendMode.REPLACE
+        : Cesium3DTileColorBlendMode.HIGHLIGHT;
+}
+
+// The wireframe draws each layer again as lines over its filled self.
 // Moving each vertex a little towards the camera, along its line of sight,
 // keeps the lines in place on screen but in front of the fill.
 const wireframeShader = new CustomShader({
@@ -229,20 +251,37 @@ const wireframeShader = new CustomShader({
         }`,
 });
 
+async function updateWireframe(layer) {
+    if (!options.wireframe) {
+        if (layer.wireframe) viewer.scene.primitives.remove(layer.wireframe);
+        layer.wireframe = undefined;
+        return;
+    }
+    if (layer.wireframe) return;
+    layer.wireframe = Cesium3DTileset.fromUrl(`/${layer.name}`, {
+        enableDebugWireframe: true,
+        debugWireframe: true,
+        customShader: wireframeShader,
+    });
+    const pending = layer.wireframe;
+    const wireframe = await pending;
+    // Turned off, or off and on again, while loading
+    if (layer.wireframe !== pending) {
+        wireframe.destroy();
+        return;
+    }
+    wireframe.cacheBytes = layer.tileset.cacheBytes;
+    layer.wireframe = viewer.scene.primitives.add(wireframe);
+}
+
 async function loadLayer(name) {
     const tileset = await Cesium3DTileset.fromUrl(`/${name}`);
     tileset.cacheBytes = 1024 * (1 << 20);
-    if (params.has("lulc")) styleLulcOnceDetected(tileset);
     viewer.scene.primitives.add(tileset);
-    if (params.has("wireframe")) {
-        const wireframe = await Cesium3DTileset.fromUrl(`/${name}`, {
-            enableDebugWireframe: true,
-            debugWireframe: true,
-            customShader: wireframeShader,
-        });
-        wireframe.cacheBytes = tileset.cacheBytes;
-        viewer.scene.primitives.add(wireframe);
-    }
+    const layer = { name, tileset, hasClassColors: false, wireframe: undefined };
+    layers.push(layer);
+    watchForClassColors(layer);
+    updateWireframe(layer);
     return tileset;
 }
 
@@ -259,3 +298,25 @@ async function loadData() {
 }
 
 loadData();
+
+function setOption(name, value) {
+    options[name] = value;
+    const urlParams = new URLSearchParams(globalThis.location.search);
+    // The globe's flag is "noglobe", set when it's hidden
+    const flag = name === "globe" ? "noglobe" : name;
+    if (name === "globe" ? !value : value) urlParams.set(flag, "");
+    else urlParams.delete(flag);
+    globalThis.history.replaceState(null, "", `${globalThis.location.pathname}?${urlParams}`);
+
+    if (name === "globe") updateGlobe();
+    for (const layer of layers) {
+        if (name === "lulc") updateLulc(layer);
+        if (name === "wireframe") updateWireframe(layer);
+    }
+}
+
+for (const name of Object.keys(options)) {
+    const checkbox = document.getElementById(`option-${name}`);
+    checkbox.checked = options[name];
+    checkbox.addEventListener("change", () => setOption(name, checkbox.checked));
+}
