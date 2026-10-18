@@ -53,3 +53,4 @@ mimalloc = "0.1.52"
 [dev-dependencies]
 flate2 = "1.1.9"
 zstd = "0.13.3"
+tower = { version = "0.5.3", features = ["util"] }

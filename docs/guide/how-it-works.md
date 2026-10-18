@@ -50,3 +50,11 @@ archive's encoding, the compressed bytes are sent as they are: zstd entries as
 `Content-Encoding: zstd` (when their window is at most 8MB, per RFC 9659), and
 deflate entries wrapped as `Content-Encoding: gzip`. Otherwise they are
 decompressed, and compressed again if the client accepts another encoding.
+
+# HTTP caching
+
+Tile, content and raster responses are addressed by layer hash, so successful
+ones are sent with `Cache-Control: public, max-age=31536000, immutable`. Layer
+lists and root tilesets use `public, max-age=24`. Error responses are always
+sent with `Cache-Control: no-store`, so a failed source read is retried rather
+than cached by clients or CDNs.

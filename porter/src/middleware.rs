@@ -1,28 +1,34 @@
 use axum::body::Body;
-use axum::http::Request;
 use axum::http::header::CACHE_CONTROL;
+use axum::http::{HeaderValue, Request};
 use axum::middleware::Next;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 
 pub async fn cache_short(req: Request<Body>, next: Next) -> impl IntoResponse {
     let mut res = next.run(req).await;
-    res.headers_mut()
-        .insert(CACHE_CONTROL, "public, max-age=24".parse().unwrap());
+    set_cache_control(&mut res, "public, max-age=24");
     res
 }
 
 pub async fn cache_forever(req: Request<Body>, next: Next) -> impl IntoResponse {
     let mut res = next.run(req).await;
-    res.headers_mut().insert(
-        CACHE_CONTROL,
-        "public, max-age=31536000, immutable".parse().unwrap(), // 1 year
-    );
+    set_cache_control(&mut res, "public, max-age=31536000, immutable"); // 1 year
     res
 }
 
-pub async fn security_headers(req: Request<Body>, next: Next) -> impl IntoResponse {
-    use axum::http::HeaderValue;
+// Only successful responses are cacheable: errors can come from transient
+// source failures, and must not stick in clients or CDNs
+fn set_cache_control(res: &mut Response, cacheable: &'static str) {
+    let value = if res.status().is_success() {
+        cacheable
+    } else {
+        "no-store"
+    };
+    res.headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static(value));
+}
 
+pub async fn security_headers(req: Request<Body>, next: Next) -> impl IntoResponse {
     let mut response = next.run(req).await;
     let headers = response.headers_mut();
 
@@ -51,4 +57,38 @@ pub async fn security_headers(req: Request<Body>, next: Next) -> impl IntoRespon
     );
 
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::Router;
+    use axum::http::StatusCode;
+    use axum::middleware::from_fn;
+    use axum::routing::get;
+    use tower::ServiceExt;
+
+    async fn cache_control(path: &str) -> String {
+        let app = Router::new()
+            .route("/ok", get(|| async { "tile" }))
+            .route("/missing", get(|| async { StatusCode::NOT_FOUND }))
+            .route(
+                "/failed",
+                get(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
+            )
+            .route_layer(from_fn(cache_forever));
+        let req = Request::builder().uri(path).body(Body::empty()).unwrap();
+        let res = app.oneshot(req).await.unwrap();
+        res.headers()[CACHE_CONTROL].to_str().unwrap().to_string()
+    }
+
+    #[tokio::test]
+    async fn only_successful_responses_are_cached() {
+        assert_eq!(
+            cache_control("/ok").await,
+            "public, max-age=31536000, immutable"
+        );
+        assert_eq!(cache_control("/missing").await, "no-store");
+        assert_eq!(cache_control("/failed").await, "no-store");
+    }
 }
