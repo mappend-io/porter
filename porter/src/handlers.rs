@@ -176,6 +176,9 @@ pub async fn get_child_tileset(
         .ok_or(StatusCode::NOT_FOUND)?
         .parse()
         .map_err(|_| StatusCode::NOT_FOUND)?;
+    if !crate::s2_utils::is_valid_cell(paths.face, paths.level, paths.col, row) {
+        return Err(StatusCode::NOT_FOUND);
+    }
 
     let layer_def = app_state
         .get_layer_definition(&paths.id)
@@ -408,6 +411,9 @@ pub async fn get_terrarium_tile(
         col: paths.x,
         row: actual_y,
     };
+    if !index.is_valid() {
+        return Err(StatusCode::NOT_FOUND);
+    }
 
     let bytes = terrarium::build_terrarium_rgb_tile(
         app_state.resource_loader.clone(),
@@ -486,6 +492,9 @@ pub async fn get_wmts_simple_imagery(
         col: paths.x,
         row: actual_y,
     };
+    if !index.is_valid() {
+        return Err(StatusCode::NOT_FOUND);
+    }
 
     let bytes = terrarium::build_simple_wmts_imagery_tile(
         app_state.resource_loader.clone(),
@@ -554,6 +563,9 @@ pub async fn get_wmts_class_tile(
         col: paths.x,
         row: actual_y,
     };
+    if !index.is_valid() {
+        return Err(StatusCode::NOT_FOUND);
+    }
 
     let bytes = terrarium::build_simple_wmts_class_tile(
         app_state.resource_loader.clone(),

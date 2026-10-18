@@ -10,6 +10,16 @@ pub struct MapzenTileIndex {
     pub row: i32,
 }
 
+impl MapzenTileIndex {
+    /// Whether this names a Web Mercator tile: zooms past 30 have no S2 level,
+    /// and out-of-range columns and rows give nonsense coordinates
+    pub fn is_valid(&self) -> bool {
+        (0..=30).contains(&self.zoom)
+            && (0..1i64 << self.zoom).contains(&i64::from(self.col))
+            && (0..1i64 << self.zoom).contains(&i64::from(self.row))
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 pub struct Wgs84Coord2d {
     pub lat: f64,
@@ -99,4 +109,22 @@ pub fn face_level_col_row_from_cell_id(cell_id: s2::cellid::CellID) -> (u8, i32,
 pub fn hae_to_msl(val: f32) -> f32 {
     // TODO
     val
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tile_indexes_are_bounded_by_zoom() {
+        let index = |zoom, col, row| MapzenTileIndex { zoom, col, row };
+        assert!(index(0, 0, 0).is_valid());
+        assert!(index(16, 54719, 28255).is_valid());
+        assert!(index(30, (1 << 30) - 1, (1 << 30) - 1).is_valid());
+        assert!(!index(-3, 0, 0).is_valid());
+        assert!(!index(31, 0, 0).is_valid());
+        assert!(!index(5, -1, 0).is_valid());
+        assert!(!index(12, 99999, 0).is_valid());
+        assert!(!index(12, 0, 4096).is_valid());
+    }
 }

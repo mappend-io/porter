@@ -1,5 +1,14 @@
 use crate::tiles3d;
 
+/// Whether `face`, `level`, `col` and `row` name an S2 cell. Out-of-range
+/// values make nonsense cell IDs, or panic in the shifts below.
+pub fn is_valid_cell(face: u8, level: i32, col: i32, row: i32) -> bool {
+    face < 6
+        && (0..=30).contains(&level)
+        && (0..1i64 << level).contains(&i64::from(col))
+        && (0..1i64 << level).contains(&i64::from(row))
+}
+
 pub fn cell_id_from_face_level_col_row(
     face: u8,
     level: i32,
@@ -50,4 +59,26 @@ pub fn s2_tokens_to_s2_rect(tokens: &Vec<String>) -> s2::rect::Rect {
         rect = rect.union(&s2_token_to_s2_rect(token));
     }
     rect
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cells_are_bounded_by_face_and_level() {
+        assert!(is_valid_cell(0, 0, 0, 0));
+        assert!(is_valid_cell(5, 30, (1 << 30) - 1, 0));
+        assert!(is_valid_cell(1, 12, 3410, 3273));
+        assert!(!is_valid_cell(6, 0, 0, 0));
+        assert!(!is_valid_cell(0, 31, 0, 0));
+        assert!(!is_valid_cell(0, -1, 0, 0));
+        assert!(!is_valid_cell(0, 5, -1, 0));
+        assert!(!is_valid_cell(0, 5, 0, 32));
+        assert!(!is_valid_cell(0, 3, 999, 0));
+
+        // Valid cells round-trip through the cell ID
+        let cell = cell_id_from_face_level_col_row(1, 12, 3410, 3273);
+        assert_eq!(face_level_col_row_from_cell_id(cell), (1, 12, 3410, 3273));
+    }
 }
