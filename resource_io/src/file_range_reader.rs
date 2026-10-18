@@ -20,7 +20,10 @@ pub struct FileRangeReader {
 
 impl FileRangeReader {
     pub fn new(path: &str) -> Result<FileRangeReader, Error> {
-        let file = File::open(path)?;
+        let file = File::open(path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => Error::NotFound(format!("{path}: {e}")),
+            _ => Error::Io(e),
+        })?;
         let metadata = file.metadata()?;
         let size = metadata.len();
         Ok(Self {

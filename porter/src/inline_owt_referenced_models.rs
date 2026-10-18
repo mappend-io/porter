@@ -11,7 +11,7 @@ use crate::app_state::AppState;
 use crate::layer_definition::{LayerDefinition, MAX_ELEV, MIN_ELEV};
 use crate::s2_utils::{cell_id_from_face_level_col_row, face_level_col_row_from_cell_id};
 use crate::tiles3d;
-use crate::utils::local_to_ecef_with_rotation;
+use crate::utils::{local_to_ecef_with_rotation, read_error_status};
 use axum::http::StatusCode;
 use bytes::Bytes;
 use geojson::{GeoJson, Geometry, GeometryValue};
@@ -110,8 +110,8 @@ async fn source_placements(
         .try_get_with(geojson_uri.to_owned(), async {
             let bytes = match app_state.resource_loader.read_async(geojson_uri).await {
                 Ok(bytes) => bytes,
-                Err(resource_io::Error::NotFound(_)) => return Ok(Arc::new(vec![])),
-                Err(_) => return Err(StatusCode::NOT_FOUND), // TODO: distinguish 404 vs 500
+                Err(e) if e.is_not_found() => return Ok(Arc::new(vec![])),
+                Err(e) => return Err(read_error_status(&e)),
             };
             let geojson_uri = geojson_uri.to_owned();
             tokio::task::spawn_blocking(move || parse_placements(&bytes, &geojson_uri))

@@ -2,9 +2,25 @@ use super::Error;
 use super::range_reader::RangeReader;
 use async_trait::async_trait;
 use aws_sdk_s3::Client;
+use aws_sdk_s3::error::{ProvideErrorMetadata, SdkError};
 use bytes::Bytes;
 use metrics::counter;
 use tracing::trace;
+
+// Missing objects are not found; anything else is a failed read
+fn s3_error<E, R>(operation: &str, e: SdkError<E, R>) -> Error
+where
+    E: ProvideErrorMetadata + std::error::Error + 'static,
+    R: std::fmt::Debug,
+{
+    let missing = matches!(e.code(), Some("NoSuchKey" | "NotFound"));
+    let message = format!("S3 {operation} failed: {e}");
+    if missing {
+        Error::NotFound(message)
+    } else {
+        Error::Io(std::io::Error::other(message))
+    }
+}
 
 pub struct S3RangeReader {
     client: Client,
@@ -21,7 +37,7 @@ impl S3RangeReader {
             .key(&key)
             .send()
             .await
-            .map_err(|e| Error::Io(std::io::Error::other(format!("S3 HeadObject failed: {e}"))))?;
+            .map_err(|e| s3_error("HeadObject", e))?;
 
         let size = head_output.content_length().unwrap_or(0) as u64;
 
@@ -57,7 +73,7 @@ impl S3RangeReader {
             .range(format!("bytes=-{tail_len}"))
             .send()
             .await
-            .map_err(|e| Error::Io(std::io::Error::other(format!("S3 GetObject failed: {e}"))))?;
+            .map_err(|e| s3_error("GetObject", e))?;
 
         // e.g. "bytes 1000-1999/2000"
         let total_from_range = get_output
@@ -116,7 +132,7 @@ pub async fn read_object(client: &Client, bucket: &str, key: &str) -> Result<Byt
         .key(key)
         .send()
         .await
-        .map_err(|e| Error::Io(std::io::Error::other(format!("S3 GetObject failed: {e}"))))?;
+        .map_err(|e| s3_error("GetObject", e))?;
 
     let bytes = get_output
         .body
@@ -158,7 +174,7 @@ impl RangeReader for S3RangeReader {
             .range(range_header)
             .send()
             .await
-            .map_err(|e| Error::Io(std::io::Error::other(format!("S3 GetObject failed: {e}"))))?;
+            .map_err(|e| s3_error("GetObject", e))?;
 
         let aggregated_bytes = get_output.body.collect().await.map_err(|e| {
             Error::Io(std::io::Error::other(format!(

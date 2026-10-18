@@ -290,7 +290,7 @@ pub async fn get_content_payload(
         .resource_loader
         .read_entry_async(uri)
         .await
-        .map_err(|_| StatusCode::NOT_FOUND)?; // TODO: distinguish 404 vs 500
+        .map_err(|e| read_error_status(&e))?;
 
     // TODO: Add s2_level
     counter!("porter_content_3dtiles_tiles_total").increment(1);
@@ -328,7 +328,7 @@ pub async fn get_base_globe_terrain_payload(
         .resource_loader
         .read_entry_async(uri)
         .await
-        .map_err(|_| StatusCode::NOT_FOUND)?; // TODO: distinguish 404 vs 500
+        .map_err(|e| read_error_status(&e))?;
 
     // TODO: Would be nice to capture s2 level here
     counter!("porter_low_res_globe_passthrough_tiles_total").increment(1);
@@ -396,8 +396,7 @@ pub async fn get_terrarium_tile(
         &index,
     )
     .await
-    // TODO: We should probably backfill here instead
-    .unwrap_or_else(|_| terrarium::make_empty_tile(&index));
+    .map_err(raster_error_status)?;
 
     let content_type = "image/png";
     let mut headers = HeaderMap::new();
@@ -406,6 +405,13 @@ pub async fn get_terrarium_tile(
     counter!("porter_terrarium_tiles_total", "zoom_level" => paths.zoom.to_string()).increment(1);
 
     Ok((headers, bytes))
+}
+
+// Raster tiles are built empty where there is no source data, so an error is a
+// failed read or a source that couldn't be decoded
+fn raster_error_status(e: anyhow::Error) -> StatusCode {
+    tracing::warn!("Raster tile failed: {e:#}");
+    StatusCode::BAD_GATEWAY
 }
 
 #[derive(Debug, Deserialize)]
@@ -468,8 +474,7 @@ pub async fn get_wmts_simple_imagery(
         &index,
     )
     .await
-    // TODO: We should probably backfill here instead
-    .unwrap_or_else(|_| terrarium::make_empty_wmts_simple_imagery_tile(&index));
+    .map_err(raster_error_status)?;
 
     let content_type = "image/jpeg";
     let mut headers = HeaderMap::new();

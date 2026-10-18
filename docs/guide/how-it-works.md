@@ -58,3 +58,13 @@ ones are sent with `Cache-Control: public, max-age=31536000, immutable`. Layer
 lists and root tilesets use `public, max-age=24`. Error responses are always
 sent with `Cache-Control: no-store`, so a failed source read is retried rather
 than cached by clients or CDNs.
+
+Porter tells missing source data apart from failed reads. Missing data is a
+404 for content, and an empty tile or tileset where Porter generates the tile
+(rasters, and referenced models with a `tileLevel`), since that is the correct
+answer for an area without data. Any other failure is a 502, and raster tiles
+fail rather than being served with the sources that couldn't be read.
+
+On S3, a missing object is only distinguishable from a failure if Porter has
+`s3:ListBucket` on the bucket: without it, S3 answers 403 for missing objects,
+which Porter treats as a failure, so areas outside a layer's data would be 502s.

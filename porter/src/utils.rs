@@ -138,6 +138,17 @@ async fn find_tile_at_level(
     Ok(None)
 }
 
+/// The response status for a failed source read: 404 if the resource doesn't
+/// exist, 502 if reading it failed (worth retrying, so never cached)
+pub fn read_error_status(e: &resource_io::Error) -> axum::http::StatusCode {
+    if e.is_not_found() {
+        axum::http::StatusCode::NOT_FOUND
+    } else {
+        tracing::warn!("Source read failed: {e}");
+        axum::http::StatusCode::BAD_GATEWAY
+    }
+}
+
 pub fn sniff_content_type(bytes: &[u8]) -> &'static str {
     if bytes.starts_with(b"glTF") {
         return "model/gltf-binary";

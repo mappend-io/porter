@@ -355,6 +355,21 @@ pub fn make_empty_tile(index: &MapzenTileIndex) -> Bytes {
     encode_mapzen_elevation_tile_png(&r)
 }
 
+// Sources outside the data's coverage don't exist, and the tile is built
+// without them. Any other failure fails the tile, rather than serving a partial
+// one that would be cached as if it were complete.
+fn skip_missing_source<T>(result: Result<T>) -> Option<Result<T>> {
+    match result {
+        Err(e)
+            if e.downcast_ref::<resource_io::Error>()
+                .is_some_and(|e| e.is_not_found()) =>
+        {
+            None
+        }
+        result => Some(result),
+    }
+}
+
 // Questions:
 // - TODO: Lookup whether mapzen tiles are bathymetry in water or hydro surface
 // - TODO: Lookup whether mapzen elevations are hae or msl
@@ -371,9 +386,11 @@ pub async fn build_terrarium_rgb_tile(
     let gd_coverage = mapzen_tile_to_wgs84_envelope(index);
     tracing::trace!("Coverage {gd_coverage:?}");
 
-    // Find corresponding S2 raster level
-    let s2_raster_level = mapzen_zoom_to_s2_level(index.zoom)
-        .with_context(|| format!("Could not map zoom level {} to S2 level", index.zoom))?;
+    // Find corresponding S2 raster level. Zooms without one have no data.
+    let Some(s2_raster_level) = mapzen_zoom_to_s2_level(index.zoom) else {
+        tracing::trace!("No S2 raster level for zoom level {}", index.zoom);
+        return Ok(make_empty_tile(index));
+    };
     tracing::trace!(
         "Mapzen level {} maps to s2 raster level {}",
         index.zoom,
@@ -381,8 +398,8 @@ pub async fn build_terrarium_rgb_tile(
     );
 
     if s2_raster_level < s2_content_package_level && fallback_raster_template_uri.is_none() {
-        // Maybe just make an HAE=0 version and return it?
-        bail!("Nothing to do: no fallback raster")
+        // Nothing to do: no fallback raster
+        return Ok(make_empty_tile(index));
     }
 
     // Find S2 coverage at S2 raster level
@@ -425,9 +442,8 @@ pub async fn build_terrarium_rgb_tile(
     }))
     .await
     .into_iter()
-    // It's ok that these fail sometimes, we might not have entire world coverage of input data
-    .filter_map(|r| r.ok())
-    .collect();
+    .filter_map(skip_missing_source)
+    .collect::<Result<_>>()?;
 
     // Make output image, our warp target
     let index = *index;
@@ -493,9 +509,11 @@ pub async fn build_simple_wmts_imagery_tile(
     let gd_coverage = mapzen_tile_to_wgs84_envelope(index);
     tracing::trace!("Coverage {gd_coverage:?}");
 
-    // Find corresponding S2 raster level
-    let s2_raster_level = mapzen_zoom_to_s2_level(index.zoom)
-        .with_context(|| format!("Could not map zoom level {} to S2 level", index.zoom))?;
+    // Find corresponding S2 raster level. Zooms without one have no data.
+    let Some(s2_raster_level) = mapzen_zoom_to_s2_level(index.zoom) else {
+        tracing::trace!("No S2 raster level for zoom level {}", index.zoom);
+        return Ok(make_empty_wmts_simple_imagery_tile(index));
+    };
     tracing::trace!(
         "Mapzen level {} maps to s2 raster level {}",
         index.zoom,
@@ -503,8 +521,8 @@ pub async fn build_simple_wmts_imagery_tile(
     );
 
     if s2_raster_level < s2_content_package_level && fallback_raster_template_uri.is_none() {
-        // Maybe just make an HAE=0 version and return it?
-        bail!("Nothing to do: no fallback raster")
+        // Nothing to do: no fallback raster
+        return Ok(make_empty_wmts_simple_imagery_tile(index));
     }
 
     // Find S2 coverage at S2 raster level
@@ -535,9 +553,8 @@ pub async fn build_simple_wmts_imagery_tile(
     }))
     .await
     .into_iter()
-    // It's ok that these fail sometimes, we might not have entire world coverage of input data
-    .filter_map(|r| r.ok())
-    .collect();
+    .filter_map(skip_missing_source)
+    .collect::<Result<_>>()?;
 
     // Make output image, our warp target
     let index = *index;
@@ -664,4 +681,26 @@ pub async fn read_content_raster_s2_from_jpg(
     })
     .await
     .context("Join error")?
+}
+
+#[cfg(test)]
+mod missing_source_tests {
+    use super::*;
+
+    #[test]
+    fn only_missing_sources_are_skipped() {
+        let missing: Result<()> = Err(anyhow::Error::from(resource_io::Error::NotFound(
+            "no such key".to_string(),
+        )))
+        .context("Could not read source");
+        assert!(skip_missing_source(missing).is_none());
+
+        let failed: Result<()> = Err(anyhow::Error::from(resource_io::Error::Io(
+            std::io::Error::other("S3 GetObject failed"),
+        )))
+        .context("Could not read source");
+        assert!(matches!(skip_missing_source(failed), Some(Err(_))));
+
+        assert!(matches!(skip_missing_source(Ok(1)), Some(Ok(1))));
+    }
 }

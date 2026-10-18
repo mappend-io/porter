@@ -19,3 +19,11 @@ pub enum Error {
     #[error("S3 error: {0}")]
     S3(String),
 }
+
+impl Error {
+    /// The resource doesn't exist, as opposed to a read that failed and might
+    /// succeed if retried
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, Error::NotFound(_))
+    }
+}
