@@ -281,8 +281,7 @@ pub async fn get_content_payload(
         content_root.push_str("/tileset.json");
     }
     let root = UriAbsoluteStr::new(&content_root).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let relative = UriReferenceStr::new(&paths.rest).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let resolved = relative.resolve_against(root).to_string();
+    let resolved = resolve_content_uri(root, &paths.rest).ok_or(StatusCode::NOT_FOUND)?;
 
     if let Some(options) = layer_def.inline_owt_referenced_models()
         && inline_owt_referenced_models::transforms_payload(&paths.rest)
@@ -320,6 +319,18 @@ pub async fn get_content_payload(
     counter!("porter_content_3dtiles_tiles_total").increment(1);
 
     entry_response(&paths.rest, entry, &request_headers).await
+}
+
+/// The URI of `rest`, a content path from a request, inside the package whose
+/// tileset is at `root`. `None` if it resolves outside the package: dot
+/// segments, absolute paths and other schemes would otherwise reach any
+/// object the source credentials can read.
+fn resolve_content_uri(root: &UriAbsoluteStr, rest: &str) -> Option<String> {
+    let relative = UriReferenceStr::new(rest).ok()?;
+    let resolved = relative.resolve_against(root).to_string();
+    let root = root.as_str();
+    let package_dir = &root[..=root.rfind('/')?];
+    resolved.starts_with(package_dir).then_some(resolved)
 }
 
 #[derive(Deserialize)]
@@ -862,4 +873,41 @@ pub async fn get_features_items(
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
 
     Ok((headers, bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_uris_stay_inside_their_package() {
+        let root =
+            UriAbsoluteStr::new("s3://bucket/data/product_package_34694/terrain.3tz/tileset.json")
+                .unwrap();
+        let resolve = |rest| resolve_content_uri(root, rest);
+
+        assert_eq!(
+            resolve("1/12/3410/3273.glb").as_deref(),
+            Some("s3://bucket/data/product_package_34694/terrain.3tz/1/12/3410/3273.glb")
+        );
+        assert_eq!(
+            resolve("models/./a.glb").as_deref(),
+            Some("s3://bucket/data/product_package_34694/terrain.3tz/models/a.glb")
+        );
+        assert_eq!(
+            resolve("a/../b.glb").as_deref(),
+            Some("s3://bucket/data/product_package_34694/terrain.3tz/b.glb")
+        );
+
+        // Out of the archive, the package, the dataset, or the bucket
+        assert_eq!(resolve("../tileset.json"), None);
+        assert_eq!(
+            resolve("../../other_package/terrain.3tz/tileset.json"),
+            None
+        );
+        assert_eq!(resolve("../../../../secrets.json"), None);
+        assert_eq!(resolve("/data/other/tileset.json"), None);
+        assert_eq!(resolve("s3://other-bucket/x.glb"), None);
+        assert_eq!(resolve("https://example.com/x.glb"), None);
+    }
 }
