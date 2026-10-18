@@ -212,9 +212,11 @@ const layers = [];
 
 // Land cover shows instead of imagery on tilesets whose features carry a class
 // color (the terrain's EXT_mesh_features LULC texture, with colors from each
-// tile's property table)
+// tile's property table). CesiumJS treats style colors as linear and converts
+// them to sRGB, so convert the table's sRGB colors to linear first.
+const linear = (channel) => `pow(\${color}[${channel}] / 255.0, 2.2) * 255.0`;
 const lulcStyle = new Cesium3DTileStyle({
-    color: "rgb(${color}[0], ${color}[1], ${color}[2])",
+    color: `rgb(${linear(0)}, ${linear(1)}, ${linear(2)})`,
 });
 
 function watchForClassColors(layer) {

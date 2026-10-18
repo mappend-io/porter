@@ -124,11 +124,14 @@ from each tile's own property table:
 http://localhost:3200/?layers=my-layer&noglobe&lulc
 ```
 
-The same in your own CesiumJS:
+The same in your own CesiumJS. Without HDR, CesiumJS treats style colors as
+linear (as of 1.140), so convert the table's sRGB colors or they come out
+lighter:
 
 ```js
+const linear = (i) => `pow(\${color}[${i}] / 255.0, 2.2) * 255.0`;
 tileset.style = new Cesium.Cesium3DTileStyle({
-    color: "rgb(${color}[0], ${color}[1], ${color}[2])",
+    color: `rgb(${linear(0)}, ${linear(1)}, ${linear(2)})`,
 });
 tileset.colorBlendMode = Cesium.Cesium3DTileColorBlendMode.REPLACE;
 ```
