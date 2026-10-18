@@ -118,12 +118,14 @@ impl ArchiveIndex {
                 .read_range_async(locator_offset, ZIP64_EOCD_LOCATOR_SIZE as u64)
                 .await?;
 
-            if locator_bytes[0..4] == ZIP64_EOCD_LOCATOR_SIG {
+            if locator_bytes.len() >= ZIP64_EOCD_LOCATOR_SIZE
+                && locator_bytes[0..4] == ZIP64_EOCD_LOCATOR_SIG
+            {
                 let zip64_eocd_offset =
                     u64::from_le_bytes(locator_bytes[8..16].try_into().unwrap());
                 let zip64_record = reader.read_range_async(zip64_eocd_offset, 56).await?;
 
-                if zip64_record[0..4] == ZIP64_EOCD_RECORD_SIG {
+                if zip64_record.len() >= 56 && zip64_record[0..4] == ZIP64_EOCD_RECORD_SIG {
                     cd_size = u64::from_le_bytes(zip64_record[40..48].try_into().unwrap());
                     cd_offset = u64::from_le_bytes(zip64_record[48..56].try_into().unwrap());
                 }
@@ -187,7 +189,16 @@ impl ArchiveIndex {
 
             if tag == 0x0001 {
                 // Zip64 tag
-                let mut data_idx = i + 4;
+                let zip64 = &extra_field[i + 4..i + 4 + size];
+                let u64_at = |at: usize| {
+                    zip64
+                        .get(at..at + 8)
+                        .map(|b| u64::from_le_bytes(b.try_into().unwrap()))
+                        .ok_or_else(|| {
+                            Error::BadArchive("Zip64 extra field is too short".to_string())
+                        })
+                };
+                let mut data_idx = 0;
 
                 // Per the ZIP specification, values in the Zip64 extra field ONLY exist
                 // if their 32-bit counterpart in the standard header is 0xFFFFFFFF
@@ -195,13 +206,11 @@ impl ArchiveIndex {
                     data_idx += 8; // Skip uncompressed size
                 }
                 if compressed_size_u32 == 0xFFFFFFFF {
-                    data_size =
-                        u64::from_le_bytes(extra_field[data_idx..data_idx + 8].try_into().unwrap());
+                    data_size = u64_at(data_idx)?;
                     data_idx += 8;
                 }
                 if header_offset_u32 == 0xFFFFFFFF {
-                    local_header_offset =
-                        u64::from_le_bytes(extra_field[data_idx..data_idx + 8].try_into().unwrap());
+                    local_header_offset = u64_at(data_idx)?;
                 }
                 break;
             }

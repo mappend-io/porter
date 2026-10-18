@@ -145,9 +145,8 @@ impl ResourceLoader {
                 Ok(Arc::new(FileRangeReader::new(&path.to_string_lossy())?)
                     as Arc<dyn RangeReader>)
             }
-            "https" | "http" => todo!(),
             "s3" => {
-                let bucket = parsed_uri.authority_str().unwrap().to_string(); // TODO: check for authority, that's the bucket name
+                let bucket = s3_bucket(parsed_uri)?.to_string();
                 let path = parsed_uri.path_str().trim_start_matches('/').to_string();
                 let (s3_reader, tail_offset, tail) = S3RangeReader::open_with_tail(
                     self.s3_client.clone(),
@@ -166,7 +165,7 @@ impl ResourceLoader {
                 caching_reader.seed_from_tail(tail_offset, &tail);
                 Ok(caching_reader as Arc<dyn RangeReader>)
             }
-            _ => Err(Error::BadUri("Unsupported uri scheme".to_string())),
+            scheme => Err(unsupported_scheme(scheme)),
         }?;
 
         let _ = guard.insert(reader.clone());
@@ -187,9 +186,8 @@ impl ResourceLoader {
                 Ok(Arc::new(FileRangeReader::new(&path.to_string_lossy())?)
                     as Arc<dyn RangeReader>)
             }
-            "https" | "http" => todo!(),
             // S3 objects are read whole with a single GetObject in read_async_uncached
-            _ => Err(Error::BadUri("Unsupported uri scheme".to_string())),
+            scheme => Err(unsupported_scheme(scheme)),
         }
     }
 
@@ -327,9 +325,7 @@ impl ResourceLoader {
         }
 
         if uri.scheme_str() == "s3" {
-            let bucket = uri
-                .authority_str()
-                .ok_or_else(|| Error::BadUri(format!("No bucket in s3 uri {uri}")))?;
+            let bucket = s3_bucket(uri)?;
             let key = uri.path_str().trim_start_matches('/');
             return s3_range_reader::read_object(&self.s3_client, bucket, key).await;
         }
@@ -554,7 +550,7 @@ impl ResourceLoader {
                 Ok(items)
             }
             "s3" => {
-                let bucket = uri.authority_str().unwrap().to_string();
+                let bucket = s3_bucket(uri)?.to_string();
                 let prefix = uri.path_str().trim_start_matches('/').to_string();
 
                 let res = self
@@ -582,9 +578,22 @@ impl ResourceLoader {
 
                 Ok(items)
             }
-            _ => Err(Error::BadUri("Unsupported uri scheme".to_string())),
+            scheme => Err(unsupported_scheme(scheme)),
         }
     }
+}
+
+// The bucket of an s3:// URI, its authority
+fn s3_bucket(uri: &UriAbsoluteStr) -> Result<&str, Error> {
+    uri.authority_str()
+        .filter(|bucket| !bucket.is_empty())
+        .ok_or_else(|| Error::BadUri(format!("No bucket in s3 uri {uri}")))
+}
+
+fn unsupported_scheme(scheme: &str) -> Error {
+    Error::BadUri(format!(
+        "Unsupported uri scheme {scheme}: sources must be file: or s3: URIs"
+    ))
 }
 
 // Decompress entries on the blocking pool, split into chunks across threads

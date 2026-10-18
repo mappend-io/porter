@@ -382,8 +382,45 @@ impl From<ClassColor> for String {
 }
 
 impl LayerDefinition {
-    /// Checks that need more than one field
+    /// Checks that need more than one field, or that would otherwise fail
+    /// (or panic) at request time
     pub fn validate(&self) -> Result<(), String> {
+        let (package, min, max) = (
+            self.source_s2_content_package_level,
+            self.source_s2_content_min_level,
+            self.source_s2_content_max_level,
+        );
+        if !(0 <= package && package <= min && min <= max && max <= 30) {
+            return Err(format!(
+                "Content levels must satisfy 0 <= package {package} <= min {min} <= max {max} <= 30"
+            ));
+        }
+        if !matches!(self.source_s2_content_extension.as_str(), "glb" | "geojson") {
+            return Err(format!(
+                "sourceS2ContentExtension {:?} must be glb or geojson",
+                self.source_s2_content_extension
+            ));
+        }
+        // Only file: and s3: sources can be read
+        let sources = [
+            (
+                "sourceUriContentTemplate",
+                Some(self.resolve_content_uri_template("0")),
+            ),
+            ("baseGlobeTerrainUri", self.base_globe_terrain_uri.clone()),
+        ];
+        for (field, uri) in sources
+            .iter()
+            .filter_map(|(f, u)| u.as_ref().map(|u| (f, u)))
+        {
+            let scheme = iri_string::types::UriAbsoluteStr::new(uri)
+                .map_err(|e| format!("{field} {uri:?} is not an absolute URI: {e}"))?
+                .scheme_str()
+                .to_string();
+            if !matches!(scheme.as_str(), "file" | "s3") {
+                return Err(format!("{field} {uri:?} must be a file: or s3: URI"));
+            }
+        }
         if let Some(options) = self.inline_owt_referenced_models() {
             options.validate(self.source_s2_content_max_level)?;
         }
@@ -459,6 +496,57 @@ mod tests {
         assert!(parse(r##"{"content": "x", "colors": {"1": "#gg0000"}}"##).is_err());
         assert!(parse(r##"{"content": "x", "colors": {"1": "#+f0000"}}"##).is_err());
         assert!(parse(r##"{"content": "x", "colors": {}, "typo": 1}"##).is_err());
+    }
+
+    #[test]
+    fn validate_checks_levels_extension_and_sources() {
+        let layer = |edit: &dyn Fn(&mut serde_json::Value)| {
+            let mut json = serde_json::json!({
+                "sourceUriContentTemplate": "s3://bucket/{CONTENT_ROOT_TOKEN}/terrain.3tz",
+                "sourceS2ContentPackageLevel": 7,
+                "sourceS2ContentMinLevel": 7,
+                "sourceS2ContentMaxLevel": 12,
+                "sourceS2ContentExtension": "glb",
+                "sourceS2ContentCoverageTokens": ["1"],
+                "rootGeometricError": 131072,
+                "tilesetRootProperty": {},
+                "tilesetExtensionsUsed": [],
+                "tilesetExtensionsRequired": [],
+                "version": 0,
+                "assetId": 1,
+            });
+            edit(&mut json);
+            serde_json::from_value::<LayerDefinition>(json)
+                .unwrap()
+                .validate()
+        };
+        let set = |key: &'static str, value: serde_json::Value| {
+            move |json: &mut serde_json::Value| json[key] = value.clone()
+        };
+
+        assert!(layer(&|_| {}).is_ok());
+        assert!(layer(&set("baseGlobeTerrainUri", "file:///data/globe.3tz".into())).is_ok());
+        assert!(
+            layer(&set(
+                "sourceUriContentTemplate",
+                "s3://bucket/one.3tz".into()
+            ))
+            .is_ok()
+        );
+
+        assert!(layer(&set("sourceS2ContentMinLevel", 6.into())).is_err());
+        assert!(layer(&set("sourceS2ContentMaxLevel", 6.into())).is_err());
+        assert!(layer(&set("sourceS2ContentMaxLevel", 31.into())).is_err());
+        assert!(layer(&set("sourceS2ContentExtension", "gltf".into())).is_err());
+        assert!(
+            layer(&set(
+                "sourceUriContentTemplate",
+                "https://host/x.3tz".into()
+            ))
+            .is_err()
+        );
+        assert!(layer(&set("sourceUriContentTemplate", "/data/x.3tz".into())).is_err());
+        assert!(layer(&set("baseGlobeTerrainUri", "http://host/globe.3tz".into())).is_err());
     }
 
     #[test]
